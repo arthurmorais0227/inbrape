@@ -316,4 +316,6 @@ app.post('/pdf-edit', authMiddleware, upload.single('file'), async (req, res) =>
   } catch (e) { res.status(500).json({ error: 'Erro ao processar PDF.' }); }
 });
 
-app.listen(PORT, () => console.log(`✅ Servidor em http://localhost:${PORT}`));
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Servidor rodando na porta ${PORT}`);
+});
