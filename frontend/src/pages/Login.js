@@ -9,6 +9,8 @@ const EyeIcon = ({ open }) => (
   </svg>
 );
 
+const API_URL = process.env.REACT_APP_API_URL || 'https://inbrape-production.up.railway.app';
+
 function Field({ label, type, placeholder, value, onChange, icon, showToggle, show, onToggle }) {
   return (
     <div style={{marginBottom:14}}>
@@ -17,18 +19,12 @@ function Field({ label, type, placeholder, value, onChange, icon, showToggle, sh
         <div style={{position:'absolute',left:11,top:'50%',transform:'translateY(-50%)',color:'#94A3B8',pointerEvents:'none'}}>{icon}</div>
         <input
           type={showToggle ? (show ? 'text' : 'password') : type}
-          placeholder={placeholder}
-          value={value}
-          onChange={onChange}
+          placeholder={placeholder} value={value} onChange={onChange}
           style={{width:'100%',padding:`10px ${showToggle?'38px':'12px'} 10px 36px`,background:'#F8FAFC',border:'1.5px solid #E2E8F0',borderRadius:9,fontSize:13,color:'#1E293B',outline:'none',fontFamily:'inherit',boxSizing:'border-box'}}
           onFocus={e=>e.target.style.borderColor='#1B4F8A'}
           onBlur={e=>e.target.style.borderColor='#E2E8F0'}
         />
-        {showToggle && (
-          <button type="button" onClick={onToggle} style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',color:'#94A3B8',padding:3}}>
-            <EyeIcon open={show}/>
-          </button>
-        )}
+        {showToggle && <button type="button" onClick={onToggle} style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',color:'#94A3B8',padding:3}}><EyeIcon open={show}/></button>}
       </div>
     </div>
   );
@@ -53,10 +49,7 @@ export default function Login({ onLogin }) {
     if (!login.username || !login.password) { setError('Preencha todos os campos.'); return; }
     setLoading(true); setError('');
     try {
-      const r = await fetch('http://localhost:3001/auth/login', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(login),
-      });
+      const r = await fetch(`${API_URL}/auth/login`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(login) });
       const data = await r.json();
       if (!r.ok) { setError(data.error); return; }
       localStorage.setItem('ai_token', data.token);
@@ -73,10 +66,7 @@ export default function Login({ onLogin }) {
     if (register.password.length < 6) { setError('Senha deve ter pelo menos 6 caracteres.'); return; }
     setLoading(true); setError(''); setSuccess('');
     try {
-      const r = await fetch('http://localhost:3001/auth/register', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ username: register.username, name: register.name, email: register.email, password: register.password }),
-      });
+      const r = await fetch(`${API_URL}/auth/register`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username:register.username, name:register.name, email:register.email, password:register.password }) });
       const data = await r.json();
       if (!r.ok) { setError(data.error); return; }
       setSuccess('Solicitação enviada! Aguarde aprovação do administrador.');
@@ -86,74 +76,35 @@ export default function Login({ onLogin }) {
     finally { setLoading(false); }
   }
 
-  const s = {
-    wrap: { minHeight:'100vh', display:'flex', flexDirection:'column', background:'linear-gradient(135deg, #002855 0%, #1B4F8A 60%, #2E6DB4 100%)', fontFamily:"'Inter','Segoe UI',system-ui,sans-serif" },
-    stripe: { height:4, background:'linear-gradient(90deg,#E87722,#F5A623,#E87722)' },
-    topbar: { padding:'22px 36px', display:'flex', alignItems:'center', gap:12 },
-    logoBox: { background:'white', borderRadius:8, padding:'5px 10px', boxShadow:'0 2px 10px rgba(0,0,0,0.2)', display:'flex', alignItems:'center' },
-    divider: { width:1, height:28, background:'rgba(255,255,255,0.2)' },
-    logoText: { fontSize:13, fontWeight:700, color:'white' },
-    logoSub: { fontSize:10, color:'rgba(255,255,255,0.45)', marginTop:1 },
-    center: { flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' },
-    card: { background:'white', borderRadius:20, padding:'36px 32px', width:'100%', maxWidth:420, boxShadow:'0 20px 60px rgba(0,0,0,0.25)' },
-    tabRow: { display:'flex', background:'#F1F5F9', borderRadius:10, padding:3, marginBottom:24 },
-    tabBtn: (active) => ({ flex:1, padding:'8px', border:'none', borderRadius:8, fontSize:13, fontWeight:600, cursor:'pointer', fontFamily:'inherit', transition:'all 0.18s', background: active?'white':'transparent', color: active?'#002855':'#94A3B8', boxShadow: active?'0 1px 4px rgba(0,0,0,0.1)':'none' }),
-    submitBtn: { width:'100%', padding:'12px', background:'#E87722', border:'none', borderRadius:10, color:'white', fontSize:14, fontWeight:700, cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', gap:7, boxShadow:'0 4px 14px rgba(232,119,34,0.32)', marginTop:4 },
-    footer: { padding:'14px', textAlign:'center' },
-    footerText: { fontSize:11, color:'rgba(255,255,255,0.3)' },
-  };
-
   return (
-    <div style={s.wrap}>
-      <div style={s.stripe}/>
-      <div style={s.topbar}>
-        <div style={s.logoBox}>
+    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',background:'linear-gradient(135deg,#002855 0%,#1B4F8A 60%,#2E6DB4 100%)',fontFamily:"'Inter','Segoe UI',system-ui,sans-serif"}}>
+      <div style={{height:4,background:'linear-gradient(90deg,#E87722,#F5A623,#E87722)'}}/>
+      <div style={{padding:'22px 36px',display:'flex',alignItems:'center',gap:12}}>
+        <div style={{background:'white',borderRadius:8,padding:'5px 10px',boxShadow:'0 2px 10px rgba(0,0,0,0.2)',display:'flex',alignItems:'center'}}>
           <img src="https://cic-rs.ind.br/wp-content/uploads/2025/06/INBRAPE-2.jpeg" alt="Inbrape" style={{height:24,width:'auto'}}/>
         </div>
-        <div style={s.divider}/>
-        <div><div style={s.logoText}>AI Doc Analyzer</div><div style={s.logoSub}>Sistema de análise inteligente</div></div>
+        <div style={{width:1,height:28,background:'rgba(255,255,255,0.2)'}}/>
+        <div><div style={{fontSize:13,fontWeight:700,color:'white'}}>AI Doc Analyzer</div><div style={{fontSize:10,color:'rgba(255,255,255,0.45)',marginTop:1}}>Sistema de análise inteligente</div></div>
       </div>
-
-      <div style={s.center}>
-        <div style={s.card}>
-          {/* Icon */}
+      <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',padding:'16px'}}>
+        <div style={{background:'white',borderRadius:20,padding:'36px 32px',width:'100%',maxWidth:420,boxShadow:'0 20px 60px rgba(0,0,0,0.25)'}}>
           <div style={{width:50,height:50,background:'#EAF0F8',borderRadius:14,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 18px',color:'#002855'}}>
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:24,height:24}}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-            </svg>
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:24,height:24}}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
           </div>
-          <h1 style={{fontSize:20,fontWeight:800,color:'#002855',textAlign:'center',marginBottom:4}}>
-            {tab==='login' ? 'Acesso ao sistema' : 'Solicitar acesso'}
-          </h1>
-          <p style={{fontSize:12,color:'#94A3B8',textAlign:'center',marginBottom:22}}>
-            {tab==='login' ? 'Entre com suas credenciais' : 'Preencha os dados para solicitar uma conta'}
-          </p>
-
-          {/* Tabs */}
-          <div style={s.tabRow}>
-            <button style={s.tabBtn(tab==='login')} onClick={()=>{setTab('login');setError('');setSuccess('');}}>Entrar</button>
-            <button style={s.tabBtn(tab==='register')} onClick={()=>{setTab('register');setError('');setSuccess('');}}>Criar conta</button>
+          <h1 style={{fontSize:20,fontWeight:800,color:'#002855',textAlign:'center',marginBottom:4}}>{tab==='login'?'Acesso ao sistema':'Solicitar acesso'}</h1>
+          <p style={{fontSize:12,color:'#94A3B8',textAlign:'center',marginBottom:22}}>{tab==='login'?'Entre com suas credenciais':'Preencha os dados para solicitar uma conta'}</p>
+          <div style={{display:'flex',background:'#F1F5F9',borderRadius:10,padding:3,marginBottom:24}}>
+            <button style={{flex:1,padding:'8px',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit',background:tab==='login'?'white':'transparent',color:tab==='login'?'#002855':'#94A3B8',boxShadow:tab==='login'?'0 1px 4px rgba(0,0,0,0.1)':'none'}} onClick={()=>{setTab('login');setError('');setSuccess('');}}>Entrar</button>
+            <button style={{flex:1,padding:'8px',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit',background:tab==='register'?'white':'transparent',color:tab==='register'?'#002855':'#94A3B8',boxShadow:tab==='register'?'0 1px 4px rgba(0,0,0,0.1)':'none'}} onClick={()=>{setTab('register');setError('');setSuccess('');}}>Criar conta</button>
           </div>
-
-          {/* Error / Success */}
-          {error && <div style={{background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:8,padding:'9px 12px',fontSize:12,color:'#DC2626',display:'flex',gap:7,alignItems:'center',marginBottom:14}}>
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:13,height:13,flexShrink:0}}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            {error}
-          </div>}
-          {success && <div style={{background:'#ECFDF5',border:'1px solid #6EE7B7',borderRadius:8,padding:'9px 12px',fontSize:12,color:'#059669',display:'flex',gap:7,alignItems:'center',marginBottom:14}}>
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:13,height:13,flexShrink:0}}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            {success}
-          </div>}
-
-          {tab === 'login' ? (
+          {error && <div style={{background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:8,padding:'9px 12px',fontSize:12,color:'#DC2626',display:'flex',gap:7,alignItems:'center',marginBottom:14}}><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:13,height:13,flexShrink:0}}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>{error}</div>}
+          {success && <div style={{background:'#ECFDF5',border:'1px solid #6EE7B7',borderRadius:8,padding:'9px 12px',fontSize:12,color:'#059669',display:'flex',gap:7,alignItems:'center',marginBottom:14}}><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:13,height:13,flexShrink:0}}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>{success}</div>}
+          {tab==='login' ? (
             <form onSubmit={handleLogin}>
               <Field label="Usuário" type="text" placeholder="seu.usuario" value={login.username} onChange={e=>setLogin(f=>({...f,username:e.target.value}))} icon={<PersonIcon/>}/>
               <Field label="Senha" type="password" placeholder="••••••••" value={login.password} onChange={e=>setLogin(f=>({...f,password:e.target.value}))} icon={<LockIcon/>} showToggle show={showPass} onToggle={()=>setShowPass(s=>!s)}/>
-              <button type="submit" disabled={loading} style={{...s.submitBtn, opacity: loading?0.7:1, cursor: loading?'not-allowed':'pointer'}}>
-                {loading ? <><div style={{width:14,height:14,border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'white',borderRadius:'50%',animation:'spin 0.65s linear infinite'}}/> Entrando...</> : <>
-                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:14,height:14}}><path strokeLinecap="round" strokeLinejoin="round" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/></svg>
-                  Entrar no sistema
-                </>}
+              <button type="submit" disabled={loading} style={{width:'100%',padding:'12px',background:'#E87722',border:'none',borderRadius:10,color:'white',fontSize:14,fontWeight:700,cursor:loading?'not-allowed':'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',gap:7,boxShadow:'0 4px 14px rgba(232,119,34,0.32)',opacity:loading?0.7:1}}>
+                {loading?<><div style={{width:14,height:14,border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'white',borderRadius:'50%',animation:'spin 0.65s linear infinite'}}/>Entrando...</>:<>Entrar no sistema</>}
               </button>
             </form>
           ) : (
@@ -167,18 +118,14 @@ export default function Login({ onLogin }) {
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:13,height:13,flexShrink:0,marginTop:1}}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 Sua conta será ativada após aprovação do administrador.
               </div>
-              <button type="submit" disabled={loading} style={{...s.submitBtn, background:'#002855', boxShadow:'0 4px 14px rgba(0,40,85,0.25)', opacity:loading?0.7:1, cursor:loading?'not-allowed':'pointer'}}>
-                {loading ? <><div style={{width:14,height:14,border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'white',borderRadius:'50%',animation:'spin 0.65s linear infinite'}}/> Enviando...</> : <>
-                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:14,height:14}}><path strokeLinecap="round" strokeLinejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
-                  Solicitar acesso
-                </>}
+              <button type="submit" disabled={loading} style={{width:'100%',padding:'12px',background:'#002855',border:'none',borderRadius:10,color:'white',fontSize:14,fontWeight:700,cursor:loading?'not-allowed':'pointer',fontFamily:'inherit',display:'flex',alignItems:'center',justifyContent:'center',gap:7,opacity:loading?0.7:1}}>
+                {loading?<><div style={{width:14,height:14,border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'white',borderRadius:'50%',animation:'spin 0.65s linear infinite'}}/>Enviando...</>:<>Solicitar acesso</>}
               </button>
             </form>
           )}
         </div>
       </div>
-
-      <div style={s.footer}><p style={s.footerText}>© 2026 Inbrape Tecidos Industriais · Sistema interno</p></div>
+      <div style={{padding:'14px',textAlign:'center'}}><p style={{fontSize:11,color:'rgba(255,255,255,0.3)'}}>© 2026 Inbrape Tecidos Industriais · Sistema interno</p></div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}*{box-sizing:border-box}`}</style>
     </div>
   );

@@ -9,6 +9,8 @@ import History from './pages/History';
 import AdminPanel from './pages/AdminPanel';
 import './App.css';
 
+const API_URL = process.env.REACT_APP_API_URL || 'https://inbrape-production.up.railway.app';
+
 const USER_TABS = [
   { id:'text',     label:'Texto',      d:'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',        component: TextAnalyzer },
   { id:'excel',    label:'Planilha',   d:'M3 10h18M3 14h18M10 3v18M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z',                                   component: ExcelAnalyzer },
@@ -29,19 +31,18 @@ export default function App() {
     const token = localStorage.getItem('ai_token');
     const saved = localStorage.getItem('ai_user');
     if (token && saved) {
-      fetch('http://localhost:3001/auth/verify', { headers: { 'Authorization': `Bearer ${token}` } })
+      fetch(`${API_URL}/auth/verify`, { headers: { 'Authorization': `Bearer ${token}` } })
         .then(r => { if (r.ok) setUser(JSON.parse(saved)); else handleLogout(); })
         .catch(() => {});
     }
   }, []);
 
-  // Poll pending count for admin
   useEffect(() => {
     if (user?.role !== 'admin') return;
     const check = async () => {
       const token = localStorage.getItem('ai_token');
       try {
-        const r = await fetch('http://localhost:3001/admin/users', { headers: { 'Authorization': `Bearer ${token}` } });
+        const r = await fetch(`${API_URL}/admin/users`, { headers: { 'Authorization': `Bearer ${token}` } });
         const data = await r.json();
         setPendingCount(data.filter(u => u.status === 'pending').length);
       } catch {}
@@ -57,7 +58,7 @@ export default function App() {
     setUser(null);
   }
 
-  if (!user) return <Login onLogin={setUser}/>;
+  if (!user) return <Login onLogin={setUser} apiUrl={API_URL}/>;
 
   const TABS = user.role === 'admin' ? [...USER_TABS, ADMIN_TAB] : USER_TABS;
   const ActivePage = TABS.find(t => t.id === activeTab)?.component;
@@ -81,7 +82,6 @@ export default function App() {
               <span className="header-badge-dot"/>
               Sistema online
             </div>
-            {/* User info + logout */}
             <div style={{display:'flex',alignItems:'center',gap:8,background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:20,padding:'5px 12px'}}>
               <div style={{width:22,height:22,background:'rgba(255,255,255,0.15)',borderRadius:50,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,color:'white'}}>
                 {user.name?.charAt(0).toUpperCase()}

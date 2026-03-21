@@ -1,13 +1,7 @@
-const API_URL = 'http://localhost:3001';
-
-function getToken() {
-  return localStorage.getItem('ai_token');
-}
+const API_URL = process.env.REACT_APP_API_URL || 'https://inbrape-production.up.railway.app';
 
 function authHeaders() {
-  return {
-    'Authorization': `Bearer ${getToken()}`,
-  };
+  return { 'Authorization': `Bearer ${localStorage.getItem('ai_token')}` };
 }
 
 export async function analyzeText(text, mode) {
