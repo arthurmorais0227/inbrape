@@ -1,0 +1,24 @@
+[
+  {
+    "id": "1",
+    "username": "admin",
+    "name": "Administrador",
+    "email": "admin@inbrape.com.br",
+    "passwordHash": "$2a$10$sFbsC4dPfeiF9Kyatf2DbukRIXGexClP9A4kbIsGI4.qPQS5eswpK",
+    "role": "admin",
+    "status": "approved",
+    "createdAt": "2026-03-21T13:29:17.092Z",
+    "approvedAt": "2026-03-21T13:29:17.092Z"
+  },
+  {
+    "id": "1774099831166",
+    "username": "arthur.morais",
+    "name": "Arthur Morais",
+    "email": "arthur.morais@inbrape.ind.br",
+    "passwordHash": "$2a$10$9VaPjCGe1HtH1II9/WLTA.j6yec.Fk7IawWs79gYjrjgW6vJ6.x2C",
+    "role": "user",
+    "status": "approved",
+    "createdAt": "2026-03-21T13:30:31.233Z",
+    "approvedAt": "2026-03-21T13:30:59.124Z"
+  }
+]
