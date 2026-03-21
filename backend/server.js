@@ -7,6 +7,7 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
+const fetch = require('node-fetch');
 
 const app = express();
 
