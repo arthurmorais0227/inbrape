@@ -3,9 +3,9 @@ const cors = require('cors');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const path = require('path');
-const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { Pool } = require('pg');
 require('dotenv').config();
 
 const app = express();
@@ -14,32 +14,43 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'inbrape_jwt_secret_2026';
-const USERS_FILE = path.join(__dirname, 'users.json');
 
-// ── USER STORE ────────────────────────────────
-function loadUsers() {
-  if (!fs.existsSync(USERS_FILE)) {
-    const admin = {
-      id: '1',
-      username: 'admin',
-      name: 'Administrador',
-      email: 'admin@inbrape.com.br',
-      passwordHash: bcrypt.hashSync('inbrape2026', 10),
-      role: 'admin',
-      status: 'approved',
-      createdAt: new Date().toISOString(),
-      approvedAt: new Date().toISOString(),
-    };
-    fs.writeFileSync(USERS_FILE, JSON.stringify([admin], null, 2));
-    return [admin];
+// ── POSTGRESQL ────────────────────────────────
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL?.includes('railway.internal') ? false : { rejectUnauthorized: false },
+});
+
+async function initDB() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username VARCHAR(100) UNIQUE NOT NULL,
+      name VARCHAR(200) NOT NULL,
+      email VARCHAR(200) UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role VARCHAR(20) DEFAULT 'user',
+      status VARCHAR(20) DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      approved_at TIMESTAMPTZ
+    );
+  `);
+
+  // Cria admin se não existir
+  const existing = await pool.query("SELECT id FROM users WHERE username = 'admin'");
+  if (existing.rows.length === 0) {
+    const hash = await bcrypt.hash('inbrape2026', 10);
+    await pool.query(
+      `INSERT INTO users (username, name, email, password_hash, role, status, approved_at)
+       VALUES ('admin', 'Administrador', 'admin@inbrape.com.br', $1, 'admin', 'approved', NOW())`,
+      [hash]
+    );
+    console.log('✅ Admin criado no banco.');
   }
-  return JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
-}
-
-function saveUsers(users) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  console.log('✅ Banco de dados pronto.');
 }
 
 // ── MIDDLEWARE ────────────────────────────────
@@ -55,147 +66,171 @@ function adminMiddleware(req, res, next) {
   next();
 }
 
-// ── AUTH ROUTES ───────────────────────────────
+// ── AUTH ──────────────────────────────────────
 app.post('/auth/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Preencha todos os campos.' });
-  const users = loadUsers();
-  const user = users.find(u => u.username.toLowerCase() === username.toLowerCase().trim());
-  if (!user) return res.status(401).json({ error: 'Usuário ou senha incorretos.' });
-  if (user.status === 'pending') return res.status(403).json({ error: 'Sua conta ainda não foi aprovada pelo administrador.' });
-  if (user.status === 'rejected') return res.status(403).json({ error: 'Sua solicitação de acesso foi recusada.' });
-  const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) return res.status(401).json({ error: 'Usuário ou senha incorretos.' });
-  const token = jwt.sign(
-    { id: user.id, username: user.username, role: user.role, name: user.name },
-    JWT_SECRET, { expiresIn: '8h' }
-  );
-  res.json({ token, user: { id: user.id, username: user.username, role: user.role, name: user.name, email: user.email } });
+  try {
+    const r = await pool.query('SELECT * FROM users WHERE LOWER(username) = LOWER($1)', [username.trim()]);
+    const user = r.rows[0];
+    if (!user) return res.status(401).json({ error: 'Usuário ou senha incorretos.' });
+    if (user.status === 'pending') return res.status(403).json({ error: 'Sua conta ainda não foi aprovada pelo administrador.' });
+    if (user.status === 'rejected') return res.status(403).json({ error: 'Sua solicitação de acesso foi recusada.' });
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Usuário ou senha incorretos.' });
+    const token = jwt.sign(
+      { id: user.id, username: user.username, role: user.role, name: user.name },
+      JWT_SECRET, { expiresIn: '8h' }
+    );
+    res.json({ token, user: { id: user.id, username: user.username, role: user.role, name: user.name, email: user.email } });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Erro interno.' }); }
 });
 
 app.post('/auth/register', async (req, res) => {
   const { username, name, email, password } = req.body;
   if (!username || !name || !email || !password) return res.status(400).json({ error: 'Preencha todos os campos.' });
   if (password.length < 6) return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres.' });
-  const users = loadUsers();
-  if (users.find(u => u.username.toLowerCase() === username.toLowerCase())) return res.status(409).json({ error: 'Nome de usuário já existe.' });
-  if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) return res.status(409).json({ error: 'E-mail já cadastrado.' });
-  const newUser = {
-    id: Date.now().toString(),
-    username: username.toLowerCase().trim(),
-    name: name.trim(),
-    email: email.toLowerCase().trim(),
-    passwordHash: await bcrypt.hash(password, 10),
-    role: 'user',
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-  };
-  users.push(newUser);
-  saveUsers(users);
-  res.status(201).json({ message: 'Solicitação enviada! Aguarde aprovação do administrador.' });
+  try {
+    const exists = await pool.query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($2)', [username, email]);
+    if (exists.rows.length > 0) return res.status(409).json({ error: 'Usuário ou e-mail já cadastrado.' });
+    const hash = await bcrypt.hash(password, 10);
+    await pool.query(
+      'INSERT INTO users (username, name, email, password_hash) VALUES ($1, $2, $3, $4)',
+      [username.toLowerCase().trim(), name.trim(), email.toLowerCase().trim(), hash]
+    );
+    res.status(201).json({ message: 'Solicitação enviada! Aguarde aprovação do administrador.' });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Erro ao cadastrar.' }); }
 });
 
 app.get('/auth/verify', authMiddleware, (req, res) => {
   res.json({ valid: true, user: req.user });
 });
 
-// ── ADMIN USER MANAGEMENT ─────────────────────
-app.get('/admin/users', authMiddleware, adminMiddleware, (req, res) => {
-  const users = loadUsers().map(({ passwordHash, ...u }) => u);
-  res.json(users);
+// ── ADMIN ─────────────────────────────────────
+app.get('/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT id, username, name, email, role, status, created_at, approved_at FROM users ORDER BY created_at DESC');
+    res.json(r.rows.map(u => ({
+      ...u,
+      id: String(u.id),
+      createdAt: u.created_at,
+      approvedAt: u.approved_at,
+    })));
+  } catch (e) { res.status(500).json({ error: 'Erro ao buscar usuários.' }); }
 });
 
-app.patch('/admin/users/:id/status', authMiddleware, adminMiddleware, (req, res) => {
+app.patch('/admin/users/:id/status', authMiddleware, adminMiddleware, async (req, res) => {
   const { status } = req.body;
-  if (!['approved', 'rejected', 'pending'].includes(status)) return res.status(400).json({ error: 'Status inválido.' });
-  const users = loadUsers();
-  const idx = users.findIndex(u => u.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Usuário não encontrado.' });
-  if (users[idx].role === 'admin') return res.status(403).json({ error: 'Não é possível alterar o admin.' });
-  users[idx].status = status;
-  if (status === 'approved') users[idx].approvedAt = new Date().toISOString();
-  saveUsers(users);
-  res.json({ message: 'Status atualizado.' });
+  if (!['approved','rejected','pending'].includes(status)) return res.status(400).json({ error: 'Status inválido.' });
+  try {
+    const r = await pool.query('SELECT role FROM users WHERE id=$1', [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    if (r.rows[0].role === 'admin') return res.status(403).json({ error: 'Não é possível alterar o admin.' });
+    await pool.query(
+      'UPDATE users SET status=$1, approved_at=$2 WHERE id=$3',
+      [status, status === 'approved' ? new Date() : null, req.params.id]
+    );
+    res.json({ message: 'Status atualizado.' });
+  } catch (e) { res.status(500).json({ error: 'Erro ao atualizar.' }); }
 });
 
 app.patch('/admin/users/:id/password', authMiddleware, adminMiddleware, async (req, res) => {
   const { password } = req.body;
   if (!password || password.length < 6) return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres.' });
-  const users = loadUsers();
-  const idx = users.findIndex(u => u.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Usuário não encontrado.' });
-  users[idx].passwordHash = await bcrypt.hash(password, 10);
-  saveUsers(users);
-  res.json({ message: 'Senha atualizada.' });
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, req.params.id]);
+    res.json({ message: 'Senha atualizada.' });
+  } catch (e) { res.status(500).json({ error: 'Erro ao atualizar senha.' }); }
 });
 
-app.patch('/admin/users/:id/role', authMiddleware, adminMiddleware, (req, res) => {
+app.patch('/admin/users/:id/role', authMiddleware, adminMiddleware, async (req, res) => {
   const { role } = req.body;
-  if (!['admin', 'user'].includes(role)) return res.status(400).json({ error: 'Role inválida.' });
-  const users = loadUsers();
-  const idx = users.findIndex(u => u.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Usuário não encontrado.' });
-  if (users[idx].id === '1') return res.status(403).json({ error: 'Não é possível alterar o admin principal.' });
-  users[idx].role = role;
-  saveUsers(users);
-  res.json({ message: 'Role atualizada.' });
+  if (!['admin','user'].includes(role)) return res.status(400).json({ error: 'Role inválida.' });
+  if (req.params.id === '1') return res.status(403).json({ error: 'Não é possível alterar o admin principal.' });
+  try {
+    await pool.query('UPDATE users SET role=$1 WHERE id=$2', [role, req.params.id]);
+    res.json({ message: 'Role atualizada.' });
+  } catch (e) { res.status(500).json({ error: 'Erro ao atualizar role.' }); }
 });
 
-app.delete('/admin/users/:id', authMiddleware, adminMiddleware, (req, res) => {
+app.delete('/admin/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
   if (req.params.id === '1') return res.status(403).json({ error: 'Não é possível excluir o admin principal.' });
-  const users = loadUsers();
-  const filtered = users.filter(u => u.id !== req.params.id);
-  if (filtered.length === users.length) return res.status(404).json({ error: 'Usuário não encontrado.' });
-  saveUsers(filtered);
-  res.json({ message: 'Usuário removido.' });
+  try {
+    const r = await pool.query('DELETE FROM users WHERE id=$1', [req.params.id]);
+    if (r.rowCount === 0) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    res.json({ message: 'Usuário removido.' });
+  } catch (e) { res.status(500).json({ error: 'Erro ao remover.' }); }
 });
 
-// Usuário troca própria senha
 app.patch('/user/password', authMiddleware, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Preencha todos os campos.' });
   if (newPassword.length < 6) return res.status(400).json({ error: 'Nova senha deve ter pelo menos 6 caracteres.' });
-  const users = loadUsers();
-  const idx = users.findIndex(u => u.id === req.user.id);
-  if (idx === -1) return res.status(404).json({ error: 'Usuário não encontrado.' });
-  const valid = await bcrypt.compare(currentPassword, users[idx].passwordHash);
-  if (!valid) return res.status(401).json({ error: 'Senha atual incorreta.' });
-  users[idx].passwordHash = await bcrypt.hash(newPassword, 10);
-  saveUsers(users);
-  res.json({ message: 'Senha alterada com sucesso.' });
+  try {
+    const r = await pool.query('SELECT password_hash FROM users WHERE id=$1', [req.user.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    const valid = await bcrypt.compare(currentPassword, r.rows[0].password_hash);
+    if (!valid) return res.status(401).json({ error: 'Senha atual incorreta.' });
+    const hash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, req.user.id]);
+    res.json({ message: 'Senha alterada com sucesso.' });
+  } catch (e) { res.status(500).json({ error: 'Erro ao alterar senha.' }); }
 });
 
-// ── GROQ / ANALYSIS ROUTES ────────────────────
+// ── GROQ ──────────────────────────────────────
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 async function callGroq(prompt) {
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
-    body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], max_tokens: 1500 }),
+    headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${process.env.GROQ_API_KEY}` },
+    body: JSON.stringify({ model:'llama-3.3-70b-versatile', messages:[{role:'user',content:prompt}], max_tokens:1500 }),
   });
-  if (!r.ok) { const e = await r.json(); console.error('Groq:', e); throw new Error('Erro ao chamar Groq.'); }
+  if (!r.ok) { const e = await r.json(); console.error('Groq:',e); throw new Error('Erro ao chamar Groq.'); }
   return (await r.json()).choices?.[0]?.message?.content || 'Sem resposta.';
 }
 
 async function callGroqVision(base64, mimeType, prompt) {
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+    headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${process.env.GROQ_API_KEY}` },
     body: JSON.stringify({
       model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-      messages: [{ role: 'user', content: [
-        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
-        { type: 'text', text: prompt }
+      messages: [{ role:'user', content:[
+        { type:'image_url', image_url:{ url:`data:${mimeType};base64,${base64}` } },
+        { type:'text', text:prompt }
       ]}],
       max_tokens: 1500,
     }),
   });
-  if (!r.ok) { const e = await r.json(); throw new Error('Erro ao analisar imagem.'); }
+  if (!r.ok) throw new Error('Erro ao analisar imagem.');
   return (await r.json()).choices?.[0]?.message?.content || 'Sem resposta.';
 }
 
 app.get('/', (req, res) => res.json({ status: 'AI Doc Analyzer API 🚀' }));
+
+app.post('/chat', authMiddleware, async (req, res) => {
+  const { messages } = req.body;
+  if (!messages?.length) return res.status(400).json({ error: 'Mensagens não informadas.' });
+  try {
+    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${process.env.GROQ_API_KEY}` },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role:'system', content:'Você é um assistente de IA inteligente e prestativo da Inbrape. Responda sempre em português brasileiro de forma clara, objetiva e amigável.' },
+          ...messages.slice(-20),
+        ],
+        max_tokens: 1500,
+      }),
+    });
+    if (!r.ok) throw new Error('Erro ao chamar Groq.');
+    const data = await r.json();
+    res.json({ result: data.choices?.[0]?.message?.content || 'Sem resposta.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 app.post('/analyze', authMiddleware, async (req, res) => {
   const { text, mode } = req.body;
@@ -218,17 +253,30 @@ app.post('/analyze-excel', authMiddleware, upload.single('file'), async (req, re
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
   const { question } = req.body;
   try {
-    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const wb = XLSX.read(req.file.buffer, { type:'buffer' });
     const sheet = wb.Sheets[wb.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    const data = XLSX.utils.sheet_to_json(sheet, { defval:'' });
     if (!data.length) return res.status(400).json({ error: 'Planilha vazia.' });
-    const sample = data.slice(0, 100);
+    const sample = data.slice(0,100);
     const cols = Object.keys(sample[0]);
     const prompt = question?.trim()
-      ? `Analista de dados. Responda em português: "${question}"\nArquivo: ${req.file.originalname}\nLinhas: ${data.length} | Colunas: ${cols.join(', ')}\n${JSON.stringify(sample, null, 2)}`
-      : `Analista de dados. Analise em português com: visão geral, estatísticas, tendências, anomalias, insights e próximos passos.\nArquivo: ${req.file.originalname}\nLinhas: ${data.length} | Colunas: ${cols.join(', ')}\n${JSON.stringify(sample, null, 2)}`;
-    res.json({ result: await callGroq(prompt), meta: { totalRows: data.length, columns: cols, sheetName: wb.SheetNames[0], fileName: req.file.originalname } });
+      ? `Analista de dados. Responda em português: "${question}"\nArquivo: ${req.file.originalname}\nLinhas: ${data.length} | Colunas: ${cols.join(', ')}\n${JSON.stringify(sample,null,2)}`
+      : `Analista de dados. Analise em português: visão geral, estatísticas, tendências, anomalias, insights e próximos passos.\nArquivo: ${req.file.originalname}\nLinhas: ${data.length} | Colunas: ${cols.join(', ')}\n${JSON.stringify(sample,null,2)}`;
+    res.json({ result: await callGroq(prompt), meta:{ totalRows:data.length, columns:cols, sheetName:wb.SheetNames[0], fileName:req.file.originalname } });
   } catch (e) { res.status(500).json({ error: 'Erro ao processar planilha.' }); }
+});
+
+app.post('/excel-data', authMiddleware, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
+  try {
+    const wb = XLSX.read(req.file.buffer, { type:'buffer' });
+    const sheetName = wb.SheetNames[0];
+    const sheet = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
+    if (!rows.length) return res.status(400).json({ error: 'Planilha vazia.' });
+    const columns = Object.keys(rows[0]);
+    res.json({ rows: rows.slice(0,100), columns, totalRows: rows.length, sheetName });
+  } catch (e) { res.status(500).json({ error: 'Erro ao ler planilha.' }); }
 });
 
 app.post('/analyze-image', authMiddleware, upload.single('file'), async (req, res) => {
@@ -243,7 +291,7 @@ app.post('/analyze-image', authMiddleware, upload.single('file'), async (req, re
     custom: question || 'Descreva esta imagem detalhadamente.',
   };
   try {
-    res.json({ result: await callGroqVision(req.file.buffer.toString('base64'), req.file.mimetype, prompts[mode] || prompts.describe) });
+    res.json({ result: await callGroqVision(req.file.buffer.toString('base64'), req.file.mimetype, prompts[mode]||prompts.describe) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -252,8 +300,8 @@ app.post('/analyze-document', authMiddleware, upload.single('file'), async (req,
   const { question } = req.body;
   if (!question?.trim()) return res.status(400).json({ error: 'Pergunta não informada.' });
   const ext = path.extname(req.file.originalname).toLowerCase();
-  let content = '';
   try {
+    let content = '';
     if (ext === '.pdf') {
       const PDFParser = require('pdf2json');
       content = await new Promise((resolve, reject) => {
@@ -272,7 +320,7 @@ app.post('/analyze-document', authMiddleware, upload.single('file'), async (req,
       content = req.file.buffer.toString('utf-8');
     }
     if (!content.trim()) return res.status(400).json({ error: 'Não foi possível extrair texto.' });
-    const prompt = `Analista especializado. Responda em português:\n\nPergunta: "${question}"\n\nDocumento (${req.file.originalname}):\n${content.slice(0, 12000)}\n\nResponda de forma clara e objetiva.`;
+    const prompt = `Analista especializado. Responda em português:\n\nPergunta: "${question}"\n\nDocumento (${req.file.originalname}):\n${content.slice(0,12000)}\n\nResponda de forma clara e objetiva.`;
     res.json({ result: await callGroq(prompt) });
   } catch (e) { console.error('Document error:', e); res.status(500).json({ error: 'Erro ao processar documento.' }); }
 });
@@ -287,13 +335,12 @@ app.post('/pdf-edit', authMiddleware, upload.single('file'), async (req, res) =>
     if (action === 'watermark' && watermark) {
       for (const page of pdfPages) {
         const { width, height } = page.getSize();
-        page.drawText(watermark, { x: width/2-(watermark.length*6), y: height/2, size: 48, color: rgb(0.8,0.8,0.8), opacity: 0.25, rotate: degrees(45) });
+        page.drawText(watermark, { x:width/2-(watermark.length*6), y:height/2, size:48, color:rgb(0.8,0.8,0.8), opacity:0.25, rotate:degrees(45) });
       }
     }
     if (action === 'annotate' && annotation) {
       const idx = Math.min(Math.max((parseInt(annotationPage)||1)-1, 0), pdfPages.length-1);
-      const page = pdfPages[idx];
-      page.drawText(annotation, { x: 40, y: 30, size: 10, color: rgb(0.1,0.16,0.33), maxWidth: page.getSize().width-80 });
+      pdfPages[idx].drawText(annotation, { x:40, y:30, size:10, color:rgb(0.1,0.16,0.33), maxWidth:pdfPages[idx].getSize().width-80 });
     }
     if (action === 'extract' && pages) {
       const sel = JSON.parse(pages);
@@ -306,58 +353,19 @@ app.post('/pdf-edit', authMiddleware, upload.single('file'), async (req, res) =>
         }
       }
       const bytes = await newDoc.save();
-      res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="paginas.pdf"' });
+      res.set({ 'Content-Type':'application/pdf', 'Content-Disposition':'attachment; filename="paginas.pdf"' });
       return res.send(Buffer.from(bytes));
     }
     const bytes = await pdfDoc.save();
-    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="editado.pdf"' });
+    res.set({ 'Content-Type':'application/pdf', 'Content-Disposition':'attachment; filename="editado.pdf"' });
     res.send(Buffer.from(bytes));
   } catch (e) { res.status(500).json({ error: 'Erro ao processar PDF.' }); }
 });
 
-app.post('/excel-data', authMiddleware, upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
-  try {
-    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
-    const sheetName = wb.SheetNames[0];
-    const sheet = wb.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-    if (!rows.length) return res.status(400).json({ error: 'Planilha vazia.' });
-    const columns = Object.keys(rows[0]);
-    res.json({ rows: rows.slice(0, 100), columns, totalRows: rows.length, sheetName });
-  } catch (e) {
-    res.status(500).json({ error: 'Erro ao ler planilha.' });
-  }
+// ── START ─────────────────────────────────────
+initDB().then(() => {
+  app.listen(PORT, '0.0.0.0', () => console.log(`✅ Servidor em http://localhost:${PORT}`));
+}).catch(err => {
+  console.error('❌ Erro ao conectar ao banco:', err);
+  process.exit(1);
 });
-
-// Adiciona essa rota no backend/server.js antes do app.listen
-
-app.post('/chat', authMiddleware, async (req, res) => {
-  const { messages } = req.body;
-  if (!messages || !messages.length) return res.status(400).json({ error: 'Mensagens não informadas.' });
-
-  try {
-    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          {
-            role: 'system',
-            content: 'Você é um assistente de IA inteligente e prestativo da Inbrape. Responda sempre em português brasileiro de forma clara, objetiva e amigável. Você pode ajudar com análise de textos, resumos, traduções, redação, perguntas gerais e muito mais.',
-          },
-          ...messages.slice(-30), // mantém últimas 20 mensagens para contexto
-        ],
-        max_tokens: 1500,
-      }),
-    });
-    if (!r.ok) { const e = await r.json(); throw new Error('Erro ao chamar Groq.'); }
-    const data = await r.json();
-    res.json({ result: data.choices?.[0]?.message?.content || 'Sem resposta.' });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.listen(PORT, '0.0.0.0', () => console.log(`✅ Servidor em http://localhost:${PORT}`));
