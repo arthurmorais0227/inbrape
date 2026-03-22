@@ -209,57 +209,47 @@ export default function Login({ onLogin }) {
   }
 
   async function handleRegister(e) {
-    e.preventDefault();
-    if (
-      !register.username ||
-      !register.name ||
-      !register.email ||
-      !register.password
-    ) {
-      setError("Preencha todos os campos.");
-      return;
-    }
-    if (register.password !== register.confirm) {
-      setError("As senhas não coincidem.");
-      return;
-    }
-    if (register.password.length < 6) {
-      setError("Senha deve ter pelo menos 6 caracteres.");
-      return;
-    }
-    setLoading(true);
-    setError("");
-    setSuccess("");
-    try {
-      const r = await fetch(`${API_URL}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include", // 👈 ISSO AQUI
-        body: JSON.stringify(login),
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        setError(data.error);
-        return;
-      }
-      setSuccess("Solicitação enviada! Aguarde aprovação do administrador.");
-      setRegister({
-        username: "",
-        name: "",
-        email: "",
-        password: "",
-        confirm: "",
-      });
-      setTimeout(() => {
-        setTab("login");
-        setSuccess("");
-      }, 4000);
-    } catch {
-      setError("Erro de conexão com o servidor.");
-    } finally {
-      setLoading(false);
-    }
+  e.preventDefault();
+  if (!register.username || !register.name || !register.email || !register.password) {
+    setError("Preencha todos os campos.");
+    return;
   }
+  if (register.password !== register.confirm) {
+    setError("As senhas não coincidem.");
+    return;
+  }
+  if (register.password.length < 6) {
+    setError("Senha deve ter pelo menos 6 caracteres.");
+    return;
+  }
+  setLoading(true);
+  setError("");
+  setSuccess("");
+  try {
+    const r = await fetch(`${API_URL}/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: register.username,
+        name: register.name,
+        email: register.email,
+        password: register.password,
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      setError(data.error);
+      return;
+    }
+    setSuccess("Solicitação enviada! Aguarde aprovação do administrador.");
+    setRegister({ username: "", name: "", email: "", password: "", confirm: "" });
+    setTimeout(() => { setTab("login"); setSuccess(""); }, 4000);
+  } catch {
+    setError("Erro de conexão com o servidor.");
+  } finally {
+    setLoading(false);
+  }
+}
 
   return (
     <div
