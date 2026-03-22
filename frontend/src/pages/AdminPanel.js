@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
+const API_URL = process.env.REACT_APP_API_URL || 'https://inbrape-production.up.railway.app';
+
 const I = ({ d }) => <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:14,height:14}}><path strokeLinecap="round" strokeLinejoin="round" d={d}/></svg>;
 
 const STATUS_COLORS = {
@@ -33,7 +35,7 @@ export default function AdminPanel() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
-  const [modal, setModal] = useState(null); // { type, user }
+  const [modal, setModal] = useState(null);
   const [newPass, setNewPass] = useState('');
   const [msg, setMsg] = useState({ type:'', text:'' });
 
@@ -41,7 +43,7 @@ export default function AdminPanel() {
 
   const fetchUsers = useCallback(async () => {
     try {
-      const r = await fetch('http://localhost:3001/admin/users', { headers: { 'Authorization': `Bearer ${token}` } });
+      const r = await fetch(`${API_URL}/admin/users`, { headers: { 'Authorization': `Bearer ${token}` } });
       const data = await r.json();
       setUsers(data);
     } catch { showMsg('error', 'Erro ao carregar usuários.'); }
@@ -57,7 +59,7 @@ export default function AdminPanel() {
 
   async function updateStatus(id, status) {
     try {
-      const r = await fetch(`http://localhost:3001/admin/users/${id}/status`, {
+      const r = await fetch(`${API_URL}/admin/users/${id}/status`, {
         method: 'PATCH', headers: { 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ status }),
       });
@@ -71,7 +73,7 @@ export default function AdminPanel() {
   async function changePassword() {
     if (!newPass || newPass.length < 6) { showMsg('error', 'Senha deve ter pelo menos 6 caracteres.'); return; }
     try {
-      const r = await fetch(`http://localhost:3001/admin/users/${modal.user.id}/password`, {
+      const r = await fetch(`${API_URL}/admin/users/${modal.user.id}/password`, {
         method: 'PATCH', headers: { 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ password: newPass }),
       });
@@ -85,7 +87,7 @@ export default function AdminPanel() {
   async function deleteUser(id) {
     if (!window.confirm('Tem certeza que deseja remover este usuário?')) return;
     try {
-      const r = await fetch(`http://localhost:3001/admin/users/${id}`, {
+      const r = await fetch(`${API_URL}/admin/users/${id}`, {
         method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` },
       });
       const data = await r.json();
@@ -119,7 +121,6 @@ export default function AdminPanel() {
         </div>
       )}
 
-      {/* Filter tabs */}
       <div style={{display:'flex',gap:6,marginBottom:18,background:'#F1F5F9',borderRadius:10,padding:3,width:'fit-content'}}>
         {['all','pending','approved','rejected'].map(f => (
           <button key={f} onClick={()=>setFilter(f)} style={{padding:'6px 14px',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit',background:filter===f?'white':'transparent',color:filter===f?'#002855':'#94A3B8',boxShadow:filter===f?'0 1px 4px rgba(0,0,0,0.1)':'none',transition:'all 0.15s'}}>
@@ -137,12 +138,9 @@ export default function AdminPanel() {
         <div style={{display:'flex',flexDirection:'column',gap:10}}>
           {filtered.map(user => (
             <div key={user.id} style={{background:'white',border:'1px solid #E2E8F0',borderRadius:14,padding:'16px 20px',boxShadow:'0 1px 4px rgba(0,40,85,0.06)',display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
-              {/* Avatar */}
               <div style={{width:42,height:42,background: user.role==='admin'?'#002855':'#EAF0F8',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',color:user.role==='admin'?'white':'#002855',fontWeight:700,fontSize:16,flexShrink:0}}>
                 {user.name.charAt(0).toUpperCase()}
               </div>
-
-              {/* Info */}
               <div style={{flex:1,minWidth:160}}>
                 <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
                   <span style={{fontSize:14,fontWeight:600,color:'#1E293B'}}>{user.name}</span>
@@ -154,11 +152,7 @@ export default function AdminPanel() {
                   {user.approvedAt && ` · Aprovado em ${new Date(user.approvedAt).toLocaleDateString('pt-BR')}`}
                 </div>
               </div>
-
-              {/* Status */}
               <Badge status={user.status}/>
-
-              {/* Actions */}
               {user.role !== 'admin' && (
                 <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
                   {user.status === 'pending' && (
@@ -194,7 +188,6 @@ export default function AdminPanel() {
         </div>
       )}
 
-      {/* Change password modal */}
       {modal?.type === 'password' && (
         <Modal title={`Alterar senha — ${modal.user.name}`} onClose={()=>setModal(null)}>
           <p style={{fontSize:13,color:'#64748B',marginBottom:16}}>Digite a nova senha para <strong>@{modal.user.username}</strong>.</p>
