@@ -315,4 +315,19 @@ app.post('/pdf-edit', authMiddleware, upload.single('file'), async (req, res) =>
   } catch (e) { res.status(500).json({ error: 'Erro ao processar PDF.' }); }
 });
 
+app.post('/excel-data', authMiddleware, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
+  try {
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const sheetName = wb.SheetNames[0];
+    const sheet = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    if (!rows.length) return res.status(400).json({ error: 'Planilha vazia.' });
+    const columns = Object.keys(rows[0]);
+    res.json({ rows: rows.slice(0, 100), columns, totalRows: rows.length, sheetName });
+  } catch (e) {
+    res.status(500).json({ error: 'Erro ao ler planilha.' });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => console.log(`✅ Servidor em http://localhost:${PORT}`));
