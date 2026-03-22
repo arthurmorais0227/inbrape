@@ -330,4 +330,34 @@ app.post('/excel-data', authMiddleware, upload.single('file'), async (req, res) 
   }
 });
 
+// Adiciona essa rota no backend/server.js antes do app.listen
+
+app.post('/chat', authMiddleware, async (req, res) => {
+  const { messages } = req.body;
+  if (!messages || !messages.length) return res.status(400).json({ error: 'Mensagens não informadas.' });
+
+  try {
+    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          {
+            role: 'system',
+            content: 'Você é um assistente de IA inteligente e prestativo da Inbrape. Responda sempre em português brasileiro de forma clara, objetiva e amigável. Você pode ajudar com análise de textos, resumos, traduções, redação, perguntas gerais e muito mais.',
+          },
+          ...messages.slice(-30), // mantém últimas 20 mensagens para contexto
+        ],
+        max_tokens: 1500,
+      }),
+    });
+    if (!r.ok) { const e = await r.json(); throw new Error('Erro ao chamar Groq.'); }
+    const data = await r.json();
+    res.json({ result: data.choices?.[0]?.message?.content || 'Sem resposta.' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => console.log(`✅ Servidor em http://localhost:${PORT}`));
