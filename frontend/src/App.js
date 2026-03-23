@@ -45,14 +45,6 @@ function NotificationCenter({ notifications, onDismiss }) {
   );
 }
 
-const TABS = [
-  { id:'text',     label:'Texto',      d:'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z',               component: TextAnalyzer },
-  { id:'excel',    label:'Planilha',   d:'M3 10h18M3 14h18M10 3v18M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z',                               component: ExcelAnalyzer },
-  { id:'image',    label:'Imagem',     d:'M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z', component: ImageAnalyzer },
-  { id:'document', label:'Documentos', d:'M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13',     component: DocumentAnalyzer },
-  { id:'pdf',      label:'Editor PDF', d:'M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',   component: PDFEditor },
-  { id:'history',  label:'Histórico',  d:'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',                                                                              component: History },
-];
 const ADMIN_TAB = {
   id:'admin', label:'Usuários',
   d:'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z',
