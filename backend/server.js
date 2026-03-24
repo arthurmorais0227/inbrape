@@ -107,6 +107,14 @@ app.post('/auth/login', async (req, res) => {
   res.json({ token });
 });
 
+// 👇 ADICIONA ISSO AQUI
+app.get('/auth/verify', auth, (req, res) => {
+  res.json({
+    valid: true,
+    user: req.user
+  });
+});
+
 // ─────────────────────────────────────────────
 // NVIDIA (principal)
 // ─────────────────────────────────────────────
