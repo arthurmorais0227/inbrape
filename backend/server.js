@@ -208,6 +208,31 @@ async function callGroqVision(base64, mimeType, prompt) {
   return (await r.json()).choices?.[0]?.message?.content || 'Sem resposta.';
 }
 
+// ── HELPER: lê planilha com fallback robusto ──
+function readExcelData(buffer) {
+  // cellDates: true  → datas viram objetos Date em vez de número serial
+  // raw: false       → força todos os valores como string formatada (resolve datas salvas como texto)
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true, raw: false });
+  const sheetName = wb.SheetNames[0];
+  const sheet = wb.Sheets[sheetName];
+
+  // Tentativa normal
+  let data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+  // Fallback: se voltou vazio (pode acontecer com cabeçalhos especiais ou planilhas exportadas de sistemas)
+  if (!data.length) {
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    if (rows.length >= 2) {
+      const [headers, ...body] = rows;
+      data = body.map(row =>
+        Object.fromEntries(headers.map((h, i) => [h || `Col${i + 1}`, row[i] ?? '']))
+      );
+    }
+  }
+
+  return { wb, sheetName, data };
+}
+
 app.get('/', (req, res) => res.json({ status: 'AI Doc Analyzer API 🚀' }));
 
 app.post('/chat', authMiddleware, async (req, res) => {
@@ -249,34 +274,43 @@ app.post('/analyze', authMiddleware, async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── CORRIGIDO ─────────────────────────────────
 app.post('/analyze-excel', authMiddleware, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
   const { question } = req.body;
   try {
-    const wb = XLSX.read(req.file.buffer, { type:'buffer' });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(sheet, { defval:'' });
-    if (!data.length) return res.status(400).json({ error: 'Planilha vazia.' });
-    const sample = data.slice(0,100);
+    const { wb, sheetName, data } = readExcelData(req.file.buffer);
+    if (!data.length) return res.status(400).json({ error: 'Planilha vazia ou sem dados legíveis.' });
+
+    const sample = data.slice(0, 100);
     const cols = Object.keys(sample[0]);
     const prompt = question?.trim()
-      ? `Analista de dados. Responda em português: "${question}"\nArquivo: ${req.file.originalname}\nLinhas: ${data.length} | Colunas: ${cols.join(', ')}\n${JSON.stringify(sample,null,2)}`
-      : `Analista de dados. Analise em português: visão geral, estatísticas, tendências, anomalias, insights e próximos passos.\nArquivo: ${req.file.originalname}\nLinhas: ${data.length} | Colunas: ${cols.join(', ')}\n${JSON.stringify(sample,null,2)}`;
-    res.json({ result: await callGroq(prompt), meta:{ totalRows:data.length, columns:cols, sheetName:wb.SheetNames[0], fileName:req.file.originalname } });
-  } catch (e) { res.status(500).json({ error: 'Erro ao processar planilha.' }); }
+      ? `Analista de dados. Responda em português: "${question}"\nArquivo: ${req.file.originalname}\nLinhas: ${data.length} | Colunas: ${cols.join(', ')}\n${JSON.stringify(sample, null, 2)}`
+      : `Analista de dados. Analise em português: visão geral, estatísticas, tendências, anomalias, insights e próximos passos.\nArquivo: ${req.file.originalname}\nLinhas: ${data.length} | Colunas: ${cols.join(', ')}\n${JSON.stringify(sample, null, 2)}`;
+
+    res.json({
+      result: await callGroq(prompt),
+      meta: { totalRows: data.length, columns: cols, sheetName, fileName: req.file.originalname },
+    });
+  } catch (e) {
+    console.error('analyze-excel error:', e);
+    res.status(500).json({ error: 'Erro ao processar planilha: ' + e.message });
+  }
 });
 
+// ── CORRIGIDO ─────────────────────────────────
 app.post('/excel-data', authMiddleware, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
   try {
-    const wb = XLSX.read(req.file.buffer, { type:'buffer' });
-    const sheetName = wb.SheetNames[0];
-    const sheet = wb.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
-    if (!rows.length) return res.status(400).json({ error: 'Planilha vazia.' });
-    const columns = Object.keys(rows[0]);
-    res.json({ rows: rows.slice(0,100), columns, totalRows: rows.length, sheetName });
-  } catch (e) { res.status(500).json({ error: 'Erro ao ler planilha.' }); }
+    const { sheetName, data } = readExcelData(req.file.buffer);
+    if (!data.length) return res.status(400).json({ error: 'Planilha vazia ou sem dados legíveis.' });
+
+    const columns = Object.keys(data[0]);
+    res.json({ rows: data.slice(0, 100), columns, totalRows: data.length, sheetName });
+  } catch (e) {
+    console.error('excel-data error:', e);
+    res.status(500).json({ error: 'Erro ao ler planilha: ' + e.message });
+  }
 });
 
 app.post('/analyze-image', authMiddleware, upload.single('file'), async (req, res) => {
