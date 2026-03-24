@@ -104,7 +104,16 @@ app.post('/auth/login', async (req, res) => {
     { expiresIn: '8h' }
   );
 
-  res.json({ token });
+  res.json({
+  token,
+  user: {
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    email: user.email,
+    role: user.role
+  }
+});
 });
 
 // 👇 ADICIONA ISSO AQUI
