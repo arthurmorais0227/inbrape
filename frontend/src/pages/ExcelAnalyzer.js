@@ -1,12 +1,38 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { analyzeExcel } from '../services/api';
 import { saveToHistory } from '../services/storage';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://inbrape-production.up.railway.app';
-const I = ({d,size=14}) => <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:size,height:size,flexShrink:0}}><path strokeLinecap="round" strokeLinejoin="round" d={d}/></svg>;
 
-// ── PARETO CHART ──────────────────────────────
+// ── FUNÇÕES DE SUPORTE (FORA DOS COMPONENTES) ──────────────────
+
+const I = ({ d, size = 14 }) => (
+  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ width: size, height: size, flexShrink: 0 }}>
+    <path strokeLinecap="round" strokeLinejoin="round" d={d} />
+  </svg>
+);
+
+/**
+ * Agrupa dados repetidos no Eixo X e soma seus valores no Eixo Y.
+ * Ex: Se "Empresa A" aparece 3 vezes, retorna uma única linha com a soma.
+ */
+const groupAndSum = (data, xCol, yCol) => {
+  const grouped = data.reduce((acc, row) => {
+    const key = String(row[xCol] || 'Não Identificado').trim();
+    const value = Number(row[yCol]) || 0;
+    if (!acc[key]) acc[key] = 0;
+    acc[key] += value;
+    return acc;
+  }, {});
+
+  return Object.keys(grouped).map(key => ({
+    [xCol]: key,
+    [yCol]: grouped[key]
+  }));
+};
+
+// ── COMPONENTE: PARETO CHART ──────────────────────────────
 function ParetoChart({ data, xCol, yCol }) {
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
@@ -16,12 +42,15 @@ function ParetoChart({ data, xCol, yCol }) {
     const Chart = window.Chart;
     if (!Chart) return;
 
-    // Sort descending and calculate cumulative %
-    const sorted = [...data]
-      .filter(r => r[yCol] !== '' && !isNaN(Number(r[yCol])))
+    // 1. Agrupar e Somar para evitar duplicatas
+    const groupedData = groupAndSum(data, xCol, yCol);
+
+    // 2. Ordenar DECRESCENTE e pegar o Top 20 (Melhores dados)
+    const sorted = groupedData
       .sort((a, b) => Number(b[yCol]) - Number(a[yCol]))
       .slice(0, 20);
 
+    // 3. Cálculos de Pareto
     const total = sorted.reduce((s, r) => s + Number(r[yCol]), 0);
     let cumulative = 0;
     const cumulativeData = sorted.map(r => {
@@ -29,7 +58,7 @@ function ParetoChart({ data, xCol, yCol }) {
       return parseFloat(((cumulative / total) * 100).toFixed(1));
     });
 
-    const labels = sorted.map(r => String(r[xCol] || '').slice(0, 12));
+    const labels = sorted.map(r => String(r[xCol]).slice(0, 15));
     const values = sorted.map(r => Number(r[yCol]));
 
     if (chartRef.current) chartRef.current.destroy();
@@ -76,170 +105,137 @@ function ParetoChart({ data, xCol, yCol }) {
               afterLabel: (ctx) => ctx.datasetIndex === 0 ? `Acumulado: ${cumulativeData[ctx.dataIndex]}%` : '',
             },
           },
-          annotation: {},
         },
         scales: {
           x: { ticks: { color: '#94A3B8', font: { size: 10 } }, grid: { display: false } },
-          y: { position: 'left', ticks: { color: '#94A3B8', font: { size: 11 } }, grid: { color: '#F1F5F9' }, title: { display: true, text: yCol, color: '#94A3B8', font: { size: 11 } } },
-          y2: { position: 'right', min: 0, max: 100, ticks: { color: '#E87722', font: { size: 11 }, callback: v => v + '%' }, grid: { display: false }, title: { display: true, text: '% Acumulado', color: '#E87722', font: { size: 11 } } },
+          y: { position: 'left', ticks: { color: '#94A3B8', font: { size: 11 } }, grid: { color: '#F1F5F9' } },
+          y2: { position: 'right', min: 0, max: 100, ticks: { color: '#E87722', font: { size: 11 }, callback: v => v + '%' }, grid: { display: false } },
         },
       },
     });
   }, [data, xCol, yCol]);
 
-  return <canvas ref={canvasRef}/>;
+  return <canvas ref={canvasRef} />;
 }
 
-// ── MAIN CHART COMPONENT ──────────────────────
+// ── COMPONENTE: CHART VIEW (GERAL) ──────────────────────
 function ChartView({ data, columns, aiConfig }) {
-  const [chartType, setChartType] = useState('bar');
-  const [xCol, setXCol] = useState('');
-  const [yCol, setYCol] = useState('');
+  const [chartType, setChartType] = useState(aiConfig?.chartType || 'bar');
+  const [xCol, setXCol] = useState(aiConfig?.xCol || '');
+  const [yCol, setYCol] = useState(aiConfig?.yCol || '');
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
 
-  const numericCols = columns.filter(col => {
-    const vals = data.slice(0, 20).map(r => r[col]);
-    return vals.filter(v => v !== '' && !isNaN(Number(v))).length > vals.length * 0.5;
+  const numericCols = columns.filter(c => {
+    const val = data.find(r => r[c] !== '' && r[c] !== null)?.[c];
+    return !isNaN(Number(val));
   });
-  const textCols = columns.filter(c => !numericCols.includes(c));
 
   useEffect(() => {
     if (aiConfig) {
-      if (aiConfig.chartType) setChartType(aiConfig.chartType);
-      if (aiConfig.xCol && columns.includes(aiConfig.xCol)) setXCol(aiConfig.xCol);
-      if (aiConfig.yCol && columns.includes(aiConfig.yCol)) setYCol(aiConfig.yCol);
-    } else {
-      if (textCols.length > 0 && !xCol) setXCol(textCols[0]);
-      if (numericCols.length > 0 && !yCol) setYCol(numericCols[0]);
+      setChartType(aiConfig.chartType);
+      setXCol(aiConfig.xCol);
+      setYCol(aiConfig.yCol);
     }
-  }, [columns, aiConfig]);
+  }, [aiConfig]);
 
   useEffect(() => {
-    if (chartType === 'pareto') return;
-    if (!canvasRef.current || !xCol || !yCol || !data.length) return;
-    const labels = data.slice(0,20).map(r => String(r[xCol]||'').slice(0,15));
-    const values = data.slice(0,20).map(r => Number(r[yCol])||0);
-    const colors = ['#002855','#1B4F8A','#2E6DB4','#E87722','#F5A623','#059669','#DC2626','#7C3AED','#0891B2','#D97706'];
-    if (chartRef.current) { chartRef.current.destroy(); }
+    if (chartType === 'pareto' || !canvasRef.current || !xCol || !yCol || !data.length) return;
+
+    // 1. Agrupar, Ordenar pelos melhores e pegar Top 20
+    const processedData = groupAndSum(data, xCol, yCol)
+      .sort((a, b) => Number(b[yCol]) - Number(a[yCol]))
+      .slice(0, 20);
+
+    const labels = processedData.map(r => String(r[xCol] || '').slice(0, 15));
+    const values = processedData.map(r => Number(r[yCol]) || 0);
+    const colors = ['#002855', '#1B4F8A', '#2E6DB4', '#E87722', '#F5A623', '#059669', '#DC2626', '#7C3AED', '#0891B2', '#D97706'];
+
+    if (chartRef.current) chartRef.current.destroy();
+
     const Chart = window.Chart;
     if (!Chart) return;
+
     const config = {
-      bar:      { type:'bar',      data:{ labels, datasets:[{ label:yCol, data:values, backgroundColor:colors, borderRadius:6, borderSkipped:false }] } },
-      line:     { type:'line',     data:{ labels, datasets:[{ label:yCol, data:values, borderColor:'#002855', backgroundColor:'rgba(0,40,85,0.08)', tension:0.4, fill:true, pointBackgroundColor:'#E87722', pointRadius:4 }] } },
-      pie:      { type:'pie',      data:{ labels, datasets:[{ data:values, backgroundColor:colors }] } },
-      doughnut: { type:'doughnut', data:{ labels, datasets:[{ data:values, backgroundColor:colors }] } },
+      bar: { type: 'bar', data: { labels, datasets: [{ label: yCol, data: values, backgroundColor: colors, borderRadius: 6 }] } },
+      line: { type: 'line', data: { labels, datasets: [{ label: yCol, data: values, borderColor: '#002855', backgroundColor: 'rgba(0,40,85,0.08)', tension: 0.4, fill: true }] } },
+      pie: { type: 'pie', data: { labels, datasets: [{ data: values, backgroundColor: colors }] } },
+      doughnut: { type: 'doughnut', data: { labels, datasets: [{ data: values, backgroundColor: colors }] } },
     };
+
     chartRef.current = new Chart(canvasRef.current, {
       ...config[chartType],
       options: {
-        responsive: true, maintainAspectRatio: false,
+        responsive: true,
+        maintainAspectRatio: false,
         plugins: {
-          legend: { position: chartType==='pie'||chartType==='doughnut'?'right':'top', labels:{ font:{family:'Inter,sans-serif',size:12}, color:'#475569' } },
+          legend: { position: ['pie', 'doughnut'].includes(chartType) ? 'right' : 'top' }
         },
-        scales: chartType==='bar'||chartType==='line' ? {
-          x:{ ticks:{color:'#94A3B8',font:{size:11}}, grid:{color:'#F1F5F9'} },
-          y:{ ticks:{color:'#94A3B8',font:{size:11}}, grid:{color:'#F1F5F9'} },
-        } : {},
-      },
+        scales: ['bar', 'line'].includes(chartType) ? {
+          y: { beginAtZero: true, grid: { color: '#F1F5F9' } },
+          x: { grid: { display: false } }
+        } : {}
+      }
     });
   }, [chartType, xCol, yCol, data]);
 
-  if (!data.length) return null;
-
   const CHART_TYPES = [
-    {id:'bar',      icon:'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', label:'Barras'},
-    {id:'line',     icon:'M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z', label:'Linha'},
-    {id:'pie',      icon:'M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z', label:'Pizza'},
-    {id:'doughnut', icon:'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', label:'Rosca'},
-    {id:'pareto',   icon:'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z', label:'Pareto'},
+    { id: 'bar', label: 'Barras', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2' },
+    { id: 'line', label: 'Linha', icon: 'M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18' },
+    { id: 'pie', label: 'Pizza', icon: 'M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z' },
+    { id: 'doughnut', label: 'Rosca', icon: 'M12 2a10 10 0 1010 10A10 10 0 0012 2zm0 18a8 8 0 118-8 8 8 0 01-8 8z' },
+    { id: 'pareto', label: 'Pareto', icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5' },
   ];
 
   return (
-    <div style={{marginTop:4}}>
-      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
-        <div style={{width:28,height:28,background:'#EAF0F8',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',color:'#002855'}}>
-          <I d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={15}/>
-        </div>
-        <div>
-          <div style={{fontSize:14,fontWeight:600,color:'#002855'}}>Visualização gráfica</div>
-          <div style={{fontSize:11,color:'#94A3B8'}}>Mostrando até 20 registros</div>
+    <div style={{ marginTop: 4 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ fontWeight: 600, color: '#002855' }}>Visualização (Top 20)</div>
         </div>
       </div>
 
-      {/* Pareto info */}
-      {chartType === 'pareto' && (
-        <div style={{background:'#FDF3EA',border:'1px solid #E87722',borderLeft:'3px solid #E87722',borderRadius:8,padding:'9px 12px',fontSize:12,color:'#92400E',display:'flex',gap:7,marginBottom:12}}>
-          <I d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-          <span><strong>Gráfico de Pareto (80/20):</strong> Barras azul escuro = 80% do impacto. Linha laranja = % acumulado. Ordena automaticamente do maior para o menor.</span>
-        </div>
-      )}
-
-      {/* Controls */}
-      <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:16}}>
-        <div style={{display:'flex',background:'#F1F5F9',borderRadius:10,padding:3,gap:2,flexWrap:'wrap'}}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+        <div style={{ display: 'flex', background: '#F1F5F9', borderRadius: 10, padding: 3, gap: 2 }}>
           {CHART_TYPES.map(t => (
-            <button key={t.id} onClick={()=>setChartType(t.id)} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 11px',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit',background:chartType===t.id?'white':'transparent',color:chartType===t.id?'#002855':'#94A3B8',boxShadow:chartType===t.id?'0 1px 4px rgba(0,0,0,0.1)':'none',transition:'all 0.15s'}}>
-              <I d={t.icon}/>{t.label}
+            <button key={t.id} onClick={() => setChartType(t.id)} style={{ padding: '6px 11px', border: 'none', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: chartType === t.id ? 'white' : 'transparent', color: chartType === t.id ? '#002855' : '#94A3B8' }}>
+              {t.label}
             </button>
           ))}
         </div>
-        <select value={xCol} onChange={e=>setXCol(e.target.value)} style={{padding:'6px 10px',border:'1.5px solid #E2E8F0',borderRadius:8,fontSize:12,color:'#475569',background:'white',fontFamily:'inherit',cursor:'pointer'}}>
+        <select value={xCol} onChange={e => setXCol(e.target.value)} style={{ padding: '6px', borderRadius: 8, fontSize: 12 }}>
           <option value="">Eixo X</option>
-          {columns.map(c=><option key={c} value={c}>{c}</option>)}
+          {columns.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-        <select value={yCol} onChange={e=>setYCol(e.target.value)} style={{padding:'6px 10px',border:'1.5px solid #E2E8F0',borderRadius:8,fontSize:12,color:'#475569',background:'white',fontFamily:'inherit',cursor:'pointer'}}>
-          <option value="">Eixo Y (valor)</option>
-          {numericCols.map(c=><option key={c} value={c}>{c}</option>)}
+        <select value={yCol} onChange={e => setYCol(e.target.value)} style={{ padding: '6px', borderRadius: 8, fontSize: 12 }}>
+          <option value="">Eixo Y</option>
+          {numericCols.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
 
-      {/* Canvas */}
-      <div style={{background:'white',border:'1px solid #E2E8F0',borderRadius:12,padding:20,height:320}}>
-        {chartType === 'pareto'
-          ? <ParetoChart data={data} xCol={xCol} yCol={yCol}/>
-          : <canvas ref={canvasRef}/>
-        }
+      <div style={{ background: 'white', border: '1px solid #E2E8F0', borderRadius: 12, padding: 20, height: 320 }}>
+        {chartType === 'pareto' ? <ParetoChart data={data} xCol={xCol} yCol={yCol} /> : <canvas ref={canvasRef} />}
       </div>
-
-      {/* Stats */}
-      {yCol && (
-        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginTop:12}}>
-          {[
-            {label:'Total',  value: data.reduce((s,r)=>s+(Number(r[yCol])||0),0).toLocaleString('pt-BR',{maximumFractionDigits:2})},
-            {label:'Média',  value: (data.reduce((s,r)=>s+(Number(r[yCol])||0),0)/Math.max(1,data.filter(r=>r[yCol]!=='').length)).toLocaleString('pt-BR',{maximumFractionDigits:2})},
-            {label:'Máximo', value: Math.max(...data.map(r=>Number(r[yCol])||0)).toLocaleString('pt-BR',{maximumFractionDigits:2})},
-            {label:'Mínimo', value: Math.min(...data.filter(r=>r[yCol]!=='').map(r=>Number(r[yCol])||0)).toLocaleString('pt-BR',{maximumFractionDigits:2})},
-          ].map(s=>(
-            <div key={s.label} style={{background:'white',border:'1px solid #E2E8F0',borderRadius:10,padding:'10px 14px',textAlign:'center'}}>
-              <div style={{fontSize:16,fontWeight:700,color:'#002855'}}>{s.value}</div>
-              <div style={{fontSize:11,color:'#94A3B8',marginTop:2}}>{s.label} de {yCol}</div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
-// ── MAIN ──────────────────────────────────────
+// ── COMPONENTE PRINCIPAL: EXCEL ANALYZER ──────────────────────
 export default function ExcelAnalyzer({ onNotify }) {
-  const [file, setFile]             = useState(null);
-  const [question, setQuestion]     = useState('');
+  const [file, setFile] = useState(null);
+  const [question, setQuestion] = useState('');
   const [chartPrompt, setChartPrompt] = useState('');
-  const [result, setResult]         = useState('');
-  const [meta, setMeta]             = useState(null);
-  const [rawData, setRawData]       = useState([]);
-  const [loading, setLoading]       = useState(false);
+  const [result, setResult] = useState('');
+  const [meta, setMeta] = useState(null);
+  const [rawData, setRawData] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [loadingChart, setLoadingChart] = useState(false);
   const [loadingAiChart, setLoadingAiChart] = useState(false);
-  const [error, setError]           = useState('');
-  const [dragover, setDragover]     = useState(false);
-  const [copied, setCopied]         = useState(false);
-  const [showChart, setShowChart]   = useState(false);
-  const [chartLoaded, setChartLoaded] = useState(false);
+  const [error, setError] = useState('');
+  const [showChart, setShowChart] = useState(false);
   const [aiChartConfig, setAiChartConfig] = useState(null);
   const [aiChartMsg, setAiChartMsg] = useState('');
+  const [chartLoaded, setChartLoaded] = useState(false);
   const inputRef = useRef();
 
   useEffect(() => {
@@ -250,210 +246,89 @@ export default function ExcelAnalyzer({ onNotify }) {
     document.head.appendChild(s);
   }, []);
 
-  function handleFile(f) {
-    if (!f) return;
-    const ext = '.' + f.name.split('.').pop().toLowerCase();
-    if (!['.xlsx','.xls','.csv'].includes(ext)) { setError('Apenas .xlsx, .xls e .csv são aceitos.'); return; }
-    setFile(f); setError(''); setResult(''); setMeta(null); setRawData([]); setShowChart(false); setAiChartConfig(null); setAiChartMsg('');
-  }
-
-  function formatSize(b) {
-    if (b < 1024) return b + ' B';
-    if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
-    return (b/1048576).toFixed(1) + ' MB';
-  }
-
-  async function loadRawData() {
-    if (rawData.length > 0) return rawData;
+  async function loadRawData(f = file) {
+    if (rawData.length > 0 && f === file) return rawData;
     const token = localStorage.getItem('ai_token');
-    const fd = new FormData(); fd.append('file', file);
-    const r = await fetch(`${API_URL}/excel-data`, { method:'POST', headers:{'Authorization':`Bearer ${token}`}, body:fd });
-    if (!r.ok) throw new Error('Erro ao carregar dados.');
-    const data = await r.json();
-    setRawData(data.rows);
-    if (!meta) setMeta({ columns:data.columns, totalRows:data.totalRows, sheetName:data.sheetName, fileName:file.name });
-    return data.rows;
+    const fd = new FormData(); fd.append('file', f);
+    const r = await fetch(`${API_URL}/excel-data`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: fd });
+    if (!r.ok) throw new Error('Erro ao carregar dados da planilha.');
+    const res = await r.json();
+    setRawData(res.rows);
+    setMeta({ columns: res.columns, totalRows: res.totalRows, sheetName: res.sheetName, fileName: f.name });
+    return res.rows;
   }
 
-  async function handleAnalyze() {
-    if (!file) { setError('Selecione uma planilha primeiro.'); return; }
-    setLoading(true); setError(''); setResult(''); setShowChart(false); setAiChartConfig(null);
+  const handleFile = (f) => {
+    if (!f) return;
+    setFile(f); setError(''); setResult(''); setRawData([]); setShowChart(false); setAiChartConfig(null);
+  };
+
+  const handleAnalyze = async () => {
+    if (!file) return setError('Selecione um arquivo.');
+    setLoading(true); setError('');
     try {
       const res = await analyzeExcel(file, question);
-      setResult(res.result); setMeta(res.meta);
-      saveToHistory({ type:'excel', text:file.name, mode:question||'análise geral', result:res.result });
-      onNotify?.('📊 Análise da planilha concluída!');
+      setResult(res.result);
+      setMeta(res.meta);
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
-  }
+  };
 
-  async function handleLoadChart() {
-    if (!file) return;
-    setLoadingChart(true);
-    try { await loadRawData(); setShowChart(true); }
-    catch (err) { setError(err.message); }
-    finally { setLoadingChart(false); }
-  }
-
-  async function handleAiChart() {
-    if (!chartPrompt.trim()) { setError('Digite o que você quer visualizar.'); return; }
-    if (!file) { setError('Selecione uma planilha primeiro.'); return; }
-    setLoadingAiChart(true); setError(''); setAiChartConfig(null); setAiChartMsg('');
+  const handleAiChart = async () => {
+    if (!chartPrompt.trim() || !file) return;
+    setLoadingAiChart(true);
     try {
       const rows = await loadRawData();
-      const cols = meta?.columns || Object.keys(rows[0]||{});
+      const cols = meta?.columns || Object.keys(rows[0] || {});
       const token = localStorage.getItem('ai_token');
-      const prompt = `Especialista em visualização. Pedido: "${chartPrompt}"\nColunas: ${cols.join(', ')}\nDados (5 linhas): ${JSON.stringify(rows.slice(0,5))}\nResponda APENAS com JSON: {"chartType":"bar|line|pie|doughnut|pareto","xCol":"coluna","yCol":"coluna","explanation":"explicação em português"}`;
-      const r = await fetch(`${API_URL}/analyze`, { method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`}, body:JSON.stringify({text:prompt,mode:'summary'}) });
+      const prompt = `Especialista em visualização. Pedido: "${chartPrompt}"\nColunas: ${cols.join(', ')}\nResponda APENAS JSON: {"chartType":"bar|line|pie|doughnut|pareto","xCol":"coluna","yCol":"coluna","explanation":"texto"}`;
+      
+      const r = await fetch(`${API_URL}/analyze`, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
+        body: JSON.stringify({ text: prompt, mode: 'summary' }) 
+      });
       const data = await r.json();
-      const jsonMatch = (data.result||'').match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('IA não retornou configuração válida.');
-      const config = JSON.parse(jsonMatch[0]);
+      const config = JSON.parse(data.result.match(/\{.*\}/s)[0]);
       setAiChartConfig(config);
-      setAiChartMsg(config.explanation||'');
+      setAiChartMsg(config.explanation);
       setShowChart(true);
-      onNotify?.('📈 Gráfico gerado pela IA!');
-    } catch { setError('Não foi possível interpretar o pedido. Tente ser mais específico.'); }
+    } catch (e) { setError("Erro ao gerar gráfico com IA."); }
     finally { setLoadingAiChart(false); }
-  }
-
-  async function handleCopy() {
-    await navigator.clipboard.writeText(result);
-    setCopied(true); setTimeout(()=>setCopied(false),2000);
-  }
-
-  const cols = meta?.columns || [];
+  };
 
   return (
-    <div>
-      <h1 style={{fontSize:20,fontWeight:700,color:'#002855',marginBottom:3,display:'flex',alignItems:'center',gap:8}}>
-        <div style={{width:28,height:28,background:'#EAF0F8',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',color:'#002855'}}>
-          <I d="M3 10h18M3 14h18M10 3v18M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z" size={15}/>
-        </div>
-        Análise de Planilha
-      </h1>
-      <p style={{fontSize:13,color:'#64748B',marginBottom:24}}>Faça upload, analise com IA e visualize gráficos incluindo Pareto.</p>
-
-      <div className="card">
-        <div className="card-header">
-          <div className="card-header-icon"><I d="M3 10h18M3 14h18M10 3v18M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z" size={17}/></div>
-          <div><div className="card-title">Arquivo de dados</div><div className="card-desc">.xlsx, .xls ou .csv — máx. 10MB</div></div>
-        </div>
-        {!file ? (
-          <div className={`file-drop ${dragover?'dragover':''}`} onClick={()=>inputRef.current.click()}
-            onDragOver={e=>{e.preventDefault();setDragover(true);}} onDragLeave={()=>setDragover(false)}
-            onDrop={e=>{e.preventDefault();setDragover(false);handleFile(e.dataTransfer.files[0]);}}>
-            <div className="file-drop-icon"><I d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" size={24}/></div>
-            <div className="file-drop-title">Arraste a planilha aqui</div>
-            <div className="file-drop-text">ou <span>clique para selecionar</span></div>
-            <div className="file-drop-hint">Suporta .xlsx, .xls e .csv</div>
-          </div>
-        ) : (
-          <div className="file-selected">
-            <div className="file-selected-icon"><I d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={20}/></div>
-            <div className="file-selected-info">
-              <div className="file-selected-name">{file.name}</div>
-              <div className="file-selected-size">{formatSize(file.size)}</div>
-            </div>
-            <button className="file-remove" onClick={()=>{setFile(null);setResult('');setMeta(null);setRawData([]);setShowChart(false);setAiChartConfig(null);setAiChartMsg('');}}>
-              <I d="M6 18L18 6M6 6l12 12"/>
-            </button>
-          </div>
-        )}
-        <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}} onChange={e=>handleFile(e.target.files[0])}/>
+    <div style={{ padding: 20, maxWidth: 1000, margin: '0 auto' }}>
+      <h1 style={{ color: '#002855' }}>Análise de Planilha Inbrape</h1>
+      
+      <div className="card" onClick={() => inputRef.current.click()} style={{ border: '2px dashed #ccc', padding: 40, textAlign: 'center', cursor: 'pointer', marginBottom: 20 }}>
+        {file ? `Arquivo: ${file.name}` : "Clique ou arraste sua planilha aqui"}
+        <input ref={inputRef} type="file" hidden onChange={e => handleFile(e.target.files[0])} />
       </div>
 
-      <div className="card">
-        <div className="card-header">
-          <div className="card-header-icon"><I d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" size={17}/></div>
-          <div><div className="card-title">Pergunta para análise</div><div className="card-desc">Opcional — deixe em branco para análise completa</div></div>
-        </div>
-        <input className="question-input" placeholder='Ex: "Qual produto teve mais vendas?"' value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleAnalyze()}/>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+        <input 
+          style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #ddd' }} 
+          placeholder="Pergunta para a IA ou descrição do gráfico..." 
+          value={question || chartPrompt} 
+          onChange={e => { setQuestion(e.target.value); setChartPrompt(e.target.value); }}
+        />
+        <button className="btn btn-orange" onClick={handleAnalyze} disabled={loading}>Analisar Texto</button>
+        <button className="btn btn-secondary" onClick={handleAiChart} disabled={loadingAiChart}>Gerar Gráfico IA</button>
       </div>
 
-      {file && (
-        <div className="card">
-          <div className="card-header">
-            <div className="card-header-icon" style={{background:'#FDF3EA',color:'#E87722'}}>
-              <I d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={17}/>
-            </div>
-            <div><div className="card-title">Criar gráfico com IA</div><div className="card-desc">Descreva o gráfico — suporta Barras, Linha, Pizza, Rosca e Pareto</div></div>
-          </div>
-          <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:12}}>
-            {['Mostre as vendas por produto em barras','Compare receita por mês em linha','Distribuição por categoria em pizza','Análise de Pareto por valor total','Ranking dos maiores valores em Pareto'].map((s,i)=>(
-              <button key={i} onClick={()=>setChartPrompt(s)} style={{background:'white',border:'1.5px solid #E2E8F0',borderRadius:20,padding:'4px 12px',fontSize:11,fontWeight:500,color:'#1B4F8A',cursor:'pointer',fontFamily:'inherit'}}>{s}</button>
-            ))}
-          </div>
-          <div style={{display:'flex',gap:10}}>
-            <input className="question-input" style={{flex:1}} placeholder='Ex: "análise de Pareto por faturamento" ou "vendas por vendedor em barras"' value={chartPrompt} onChange={e=>setChartPrompt(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleAiChart()}/>
-            <button className="btn btn-orange" onClick={handleAiChart} disabled={loadingAiChart} style={{width:'auto',padding:'10px 18px',fontSize:13,flexShrink:0}}>
-              {loadingAiChart?<><div className="spinner"/>Gerando...</>:<><I d="M13 10V3L4 14h7v7l9-11h-7z"/>Gerar</>}
-            </button>
-          </div>
-          {aiChartMsg && (
-            <div style={{marginTop:10,background:'#EAF0F8',border:'1px solid rgba(0,40,85,0.12)',borderLeft:'3px solid #E87722',borderRadius:8,padding:'9px 12px',fontSize:12,color:'#002855',display:'flex',gap:7}}>
-              <I d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
-              {aiChartMsg}
-            </div>
-          )}
-        </div>
-      )}
-
-      {error && <div className="error-box"><I d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>{error}</div>}
-
-      <div style={{display:'flex',gap:10}}>
-        <button className="btn btn-orange" onClick={handleAnalyze} disabled={loading} style={{flex:2}}>
-          {loading?<><div className="spinner"/>Analisando...</>:<><I d="M13 10V3L4 14h7v7l9-11h-7z"/>Analisar com IA</>}
-        </button>
-        {file && chartLoaded && (
-          <button className="btn btn-secondary" onClick={handleLoadChart} disabled={loadingChart} style={{flex:1}}>
-            {loadingChart?<><div className="spinner" style={{borderTopColor:'#002855'}}/>Carregando...</>:<><I d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>Ver gráficos</>}
-          </button>
-        )}
-      </div>
-
-      {meta && (
-        <>
-          <div className="divider"/>
-          <div className="meta-grid">
-            <div className="meta-item"><div className="meta-item-icon"><I d="M4 6h16M4 10h16M4 14h16M4 18h16"/></div><div><div className="meta-value">{meta.totalRows}</div><div className="meta-label">Linhas</div></div></div>
-            <div className="meta-item"><div className="meta-item-icon"><I d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/></div><div><div className="meta-value">{meta.columns?.length}</div><div className="meta-label">Colunas</div></div></div>
-            <div className="meta-item"><div className="meta-item-icon"><I d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></div><div><div className="meta-value" style={{fontSize:13}}>{meta.sheetName}</div><div className="meta-label">Aba</div></div></div>
-          </div>
-          <div className="columns-info">
-            <I d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            <span><strong>Colunas:</strong> {meta.columns?.join(' · ')}</span>
-          </div>
-        </>
-      )}
+      {error && <div style={{ color: 'red', marginBottom: 10 }}>{error}</div>}
 
       {showChart && rawData.length > 0 && (
-        <div className="card" style={{marginTop:16}}>
-          <ChartView data={rawData} columns={cols} aiConfig={aiChartConfig}/>
+        <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+          <ChartView data={rawData} columns={meta?.columns || []} aiConfig={aiChartConfig} />
         </div>
       )}
 
       {result && (
-        <>
-          <div className="divider"/>
-          <div className="result-header">
-            <div className="result-badge">
-              <I d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-              {question?'Resposta da IA':'Análise completa'}
-            </div>
-          </div>
-          <div className="result-box">
-            <div className="result-text"><ReactMarkdown>{result}</ReactMarkdown></div>
-          </div>
-          <div className="actions">
-            <button className="btn btn-secondary" onClick={handleCopy}>
-              {copied?<><I d="M5 13l4 4L19 7"/>Copiado!</>:<><I d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>Copiar</>}
-            </button>
-            <button className="btn btn-secondary" onClick={()=>{setFile(null);setQuestion('');setResult('');setMeta(null);setRawData([]);setShowChart(false);setAiChartConfig(null);setAiChartMsg('');setChartPrompt('');}}>
-              <I d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>Limpar
-            </button>
-          </div>
-        </>
+        <div className="card" style={{ padding: 20, background: '#f9f9f9' }}>
+          <ReactMarkdown>{result}</ReactMarkdown>
+        </div>
       )}
     </div>
   );
