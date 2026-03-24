@@ -39,7 +39,6 @@ async function initDB() {
     );
   `);
 
-  // Cria admin se não existir
   const existing = await pool.query("SELECT id FROM users WHERE username = 'admin'");
   if (existing.rows.length === 0) {
     const hash = await bcrypt.hash('inbrape2026', 10);
@@ -182,44 +181,63 @@ app.patch('/user/password', authMiddleware, async (req, res) => {
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 async function callGroq(prompt) {
-  const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${process.env.GROQ_API_KEY}` },
-    body: JSON.stringify({ model:'llama-3.3-70b-versatile', messages:[{role:'user',content:prompt}], max_tokens:1500 }),
-  });
-  if (!r.ok) { const e = await r.json(); console.error('Groq:',e); throw new Error('Erro ao chamar Groq.'); }
-  return (await r.json()).choices?.[0]?.message?.content || 'Sem resposta.';
+  try {
+    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${process.env.GROQ_API_KEY}` },
+      body: JSON.stringify({ 
+        model: 'llama-3.3-70b-versatile', 
+        messages: [{ role: 'user', content: prompt }], 
+        max_tokens: 1500,
+        temperature: 0.1 
+      }),
+    });
+    
+    if (!r.ok) { 
+      const errorData = await r.json();
+      console.error('Groq API Error Details:', JSON.stringify(errorData, null, 2));
+      throw new Error(errorData.error?.message || 'Erro na API Groq'); 
+    }
+    
+    const data = await r.json();
+    return data.choices?.[0]?.message?.content || 'Sem resposta.';
+  } catch (err) {
+    console.error('Falha ao chamar Groq:', err.message);
+    throw err;
+  }
 }
 
 async function callGroqVision(base64, mimeType, prompt) {
+  // Corrigido para modelo Vision suportado
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${process.env.GROQ_API_KEY}` },
     body: JSON.stringify({
-      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+      model: 'llama-3.2-11b-vision-preview', 
       messages: [{ role:'user', content:[
-        { type:'image_url', image_url:{ url:`data:${mimeType};base64,${base64}` } },
-        { type:'text', text:prompt }
+        { type:'text', text:prompt },
+        { type:'image_url', image_url:{ url:`data:${mimeType};base64,${base64}` } }
       ]}],
       max_tokens: 1500,
     }),
   });
-  if (!r.ok) throw new Error('Erro ao analisar imagem.');
-  return (await r.json()).choices?.[0]?.message?.content || 'Sem resposta.';
+  if (!r.ok) {
+    const e = await r.json();
+    console.error('Vision Error:', e);
+    throw new Error('Erro ao analisar imagem: ' + (e.error?.message || 'Erro desconhecido'));
+  }
+  const data = await r.json();
+  return data.choices?.[0]?.message?.content || 'Sem resposta.';
 }
 
 // ── HELPER: lê planilha com fallback robusto ──
 function readExcelData(buffer) {
-  // cellDates: true  → datas viram objetos Date em vez de número serial
-  // raw: false       → força todos os valores como string formatada (resolve datas salvas como texto)
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true, raw: false });
   const sheetName = wb.SheetNames[0];
   const sheet = wb.Sheets[sheetName];
 
-  // Tentativa normal
   let data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
-  // Fallback: se voltou vazio (pode acontecer com cabeçalhos especiais ou planilhas exportadas de sistemas)
   if (!data.length) {
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
     if (rows.length >= 2) {
@@ -239,21 +257,8 @@ app.post('/chat', authMiddleware, async (req, res) => {
   const { messages } = req.body;
   if (!messages?.length) return res.status(400).json({ error: 'Mensagens não informadas.' });
   try {
-    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${process.env.GROQ_API_KEY}` },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role:'system', content:'Você é um assistente de IA inteligente e prestativo da Inbrape. Responda sempre em português brasileiro de forma clara, objetiva e amigável.' },
-          ...messages.slice(-20),
-        ],
-        max_tokens: 1500,
-      }),
-    });
-    if (!r.ok) throw new Error('Erro ao chamar Groq.');
-    const data = await r.json();
-    res.json({ result: data.choices?.[0]?.message?.content || 'Sem resposta.' });
+    const result = await callGroq(messages.slice(-20).map(m => m.content).join('\n'));
+    res.json({ result });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -274,41 +279,51 @@ app.post('/analyze', authMiddleware, async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── CORRIGIDO ─────────────────────────────────
+// ── CORRIGIDO (Análise Otimizada para Planilhas Largas) ──
 app.post('/analyze-excel', authMiddleware, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
   const { question } = req.body;
   try {
-    const { wb, sheetName, data } = readExcelData(req.file.buffer);
-    if (!data.length) return res.status(400).json({ error: 'Planilha vazia ou sem dados legíveis.' });
+    const { data } = readExcelData(req.file.buffer);
+    if (!data.length) return res.status(400).json({ error: 'Planilha vazia ou ilegível.' });
 
-    const sample = data.slice(0, 100);
-    const cols = Object.keys(sample[0]);
-    const prompt = question?.trim()
-      ? `Analista de dados. Responda em português: "${question}"\nArquivo: ${req.file.originalname}\nLinhas: ${data.length} | Colunas: ${cols.join(', ')}\n${JSON.stringify(sample, null, 2)}`
-      : `Analista de dados. Analise em português: visão geral, estatísticas, tendências, anomalias, insights e próximos passos.\nArquivo: ${req.file.originalname}\nLinhas: ${data.length} | Colunas: ${cols.join(', ')}\n${JSON.stringify(sample, null, 2)}`;
+    // Enviar apenas uma amostra pequena (10-15 linhas) para evitar estouro de tokens
+    const sample = data.slice(0, 15);
+    const cols = Object.keys(data[0]);
+    
+    const prompt = `Você é o Analista Especialista de Dados da Inbrape. 
+Arquivo: ${req.file.originalname}
+Total de registros: ${data.length}
+Colunas: ${cols.join(', ')}
+
+Amostra dos dados (primeiras 15 linhas):
+${JSON.stringify(sample, null, 2)}
+
+Tarefa: ${question?.trim() || "Realize uma análise executiva dos dados destacando tendências e insights principais."}
+
+Responda em português brasileiro de forma técnica.`;
+
+    const result = await callGroq(prompt);
 
     res.json({
-      result: await callGroq(prompt),
-      meta: { totalRows: data.length, columns: cols, sheetName, fileName: req.file.originalname },
+      result,
+      meta: { totalRows: data.length, columns: cols, fileName: req.file.originalname },
     });
   } catch (e) {
-    console.error('analyze-excel error:', e);
+    console.error('Analyze-Excel Error:', e);
     res.status(500).json({ error: 'Erro ao processar planilha: ' + e.message });
   }
 });
 
-// ── CORRIGIDO ─────────────────────────────────
 app.post('/excel-data', authMiddleware, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
   try {
     const { sheetName, data } = readExcelData(req.file.buffer);
-    if (!data.length) return res.status(400).json({ error: 'Planilha vazia ou sem dados legíveis.' });
+    if (!data.length) return res.status(400).json({ error: 'Planilha vazia.' });
 
     const columns = Object.keys(data[0]);
     res.json({ rows: data.slice(0, 100), columns, totalRows: data.length, sheetName });
   } catch (e) {
-    console.error('excel-data error:', e);
     res.status(500).json({ error: 'Erro ao ler planilha: ' + e.message });
   }
 });
@@ -325,7 +340,8 @@ app.post('/analyze-image', authMiddleware, upload.single('file'), async (req, re
     custom: question || 'Descreva esta imagem detalhadamente.',
   };
   try {
-    res.json({ result: await callGroqVision(req.file.buffer.toString('base64'), req.file.mimetype, prompts[mode]||prompts.describe) });
+    const result = await callGroqVision(req.file.buffer.toString('base64'), req.file.mimetype, prompts[mode]||prompts.describe);
+    res.json({ result });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -354,7 +370,7 @@ app.post('/analyze-document', authMiddleware, upload.single('file'), async (req,
       content = req.file.buffer.toString('utf-8');
     }
     if (!content.trim()) return res.status(400).json({ error: 'Não foi possível extrair texto.' });
-    const prompt = `Analista especializado. Responda em português:\n\nPergunta: "${question}"\n\nDocumento (${req.file.originalname}):\n${content.slice(0,12000)}\n\nResponda de forma clara e objetiva.`;
+    const prompt = `Analista especializado. Responda em português:\n\nPergunta: "${question}"\n\nDocumento (${req.file.originalname}):\n${content.slice(0,10000)}\n\nResponda de forma clara e objetiva.`;
     res.json({ result: await callGroq(prompt) });
   } catch (e) { console.error('Document error:', e); res.status(500).json({ error: 'Erro ao processar documento.' }); }
 });
@@ -366,6 +382,7 @@ app.post('/pdf-edit', authMiddleware, upload.single('file'), async (req, res) =>
     const { PDFDocument, rgb, degrees } = require('pdf-lib');
     const pdfDoc = await PDFDocument.load(req.file.buffer);
     const pdfPages = pdfDoc.getPages();
+    
     if (action === 'watermark' && watermark) {
       for (const page of pdfPages) {
         const { width, height } = page.getSize();
@@ -398,8 +415,8 @@ app.post('/pdf-edit', authMiddleware, upload.single('file'), async (req, res) =>
 
 // ── START ─────────────────────────────────────
 initDB().then(() => {
-  app.listen(PORT, '0.0.0.0', () => console.log(`✅ Servidor em http://localhost:${PORT}`));
+  app.listen(PORT, '0.0.0.0', () => console.log(`✅ Servidor rodando na porta ${PORT}`));
 }).catch(err => {
-  console.error('❌ Erro ao conectar ao banco:', err);
+  console.error('❌ Erro fatal no banco:', err);
   process.exit(1);
 });
