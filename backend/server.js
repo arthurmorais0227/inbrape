@@ -333,7 +333,6 @@ app.post('/analyze-excel', auth, upload.single('file'), async (req, res) => {
 // ─────────────────────────────────────────────
 // ANALYZE DOCUMENT (PDF, TXT, MD, CSV)
 // ─────────────────────────────────────────────
-const PDFParser = require('pdf2json');
 
 app.post('/analyze-document', auth, upload.single('file'), async (req, res) => {
   try {
