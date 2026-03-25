@@ -6,6 +6,7 @@ const multer = require('multer');
 const XLSX = require('xlsx');
 const path = require('path');
 const bcrypt = require('bcryptjs');
+const fs = require('fs');  
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const PDFParser = require('pdf2json'); // ← adiciona isso também
