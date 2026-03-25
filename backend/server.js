@@ -498,6 +498,159 @@ app.post('/chat', auth, async (req, res) => {
   res.json({ result });
 });
 
+// ── PDF STANDARDS (adicionar antes do app.listen) ─────────────────────────────
+
+const PDFS_DIR = path.join(__dirname, 'pdf_standards');
+if (!fs.existsSync(PDFS_DIR)) fs.mkdirSync(PDFS_DIR, { recursive: true });
+
+const pdfUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, PDFS_DIR),
+    filename: (req, file, cb) => cb(null, `${Date.now()}_${file.originalname.replace(/\s/g,'_')}`),
+  }),
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') cb(null, true);
+    else cb(new Error('Apenas PDFs são aceitos.'));
+  },
+});
+
+const PDF_STANDARDS_FILE = path.join(__dirname, 'pdf_standards_meta.json');
+
+function loadStandardsMeta() {
+  if (!fs.existsSync(PDF_STANDARDS_FILE)) return [];
+  return JSON.parse(fs.readFileSync(PDF_STANDARDS_FILE, 'utf-8'));
+}
+function saveStandardsMeta(data) {
+  fs.writeFileSync(PDF_STANDARDS_FILE, JSON.stringify(data, null, 2));
+}
+
+// Listar PDFs padrão
+app.get('/pdf-standards', authMiddleware, (req, res) => {
+  res.json(loadStandardsMeta());
+});
+
+app.post('/pdf-edit', auth, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Nenhum PDF.' });
+
+  const { action, watermark, annotation, annotationPage, pages } = req.body;
+
+  try {
+    const { PDFDocument, rgb, degrees } = require('pdf-lib');
+    const pdfDoc = await PDFDocument.load(req.file.buffer);
+    const pdfPages = pdfDoc.getPages();
+
+    if (action === 'watermark' && watermark) {
+      for (const page of pdfPages) {
+        const { width, height } = page.getSize();
+        page.drawText(watermark, {
+          x: width / 2 - (watermark.length * 6),
+          y: height / 2,
+          size: 48,
+          color: rgb(0.8, 0.8, 0.8),
+          opacity: 0.25,
+          rotate: degrees(45),
+        });
+      }
+    }
+
+    if (action === 'annotate' && annotation) {
+      const idx = Math.min(Math.max((parseInt(annotationPage) || 1) - 1, 0), pdfPages.length - 1);
+      pdfPages[idx].drawText(annotation, {
+        x: 40,
+        y: 30,
+        size: 10,
+        color: rgb(0.1, 0.16, 0.33),
+        maxWidth: pdfPages[idx].getSize().width - 80,
+      });
+    }
+
+    if (action === 'extract' && pages) {
+      const sel = JSON.parse(pages);
+      const newDoc = await PDFDocument.create();
+      for (const p of sel) {
+        const i = p - 1;
+        if (i >= 0 && i < pdfPages.length) {
+          const [copied] = await newDoc.copyPages(pdfDoc, [i]);
+          newDoc.addPage(copied);
+        }
+      }
+      const bytes = await newDoc.save();
+      res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="paginas.pdf"' });
+      return res.send(Buffer.from(bytes));
+    }
+
+    // ── MERGE COM PDFs PADRÃO ──────────────────────────────────────────────
+    if (action === 'merge_standards') {
+      const { standardIds } = req.body; // array de IDs enviado pelo cliente
+      const ids = standardIds ? JSON.parse(standardIds) : [];
+      const meta = loadStandardsMeta();
+
+      const mergedDoc = await PDFDocument.create();
+
+      // Copia páginas do PDF enviado pelo usuário
+      const userPages = await mergedDoc.copyPages(pdfDoc, pdfDoc.getPageIndices());
+      userPages.forEach(p => mergedDoc.addPage(p));
+
+      // Copia páginas de cada PDF padrão selecionado
+      for (const id of ids) {
+        const entry = meta.find(m => m.id === id);
+        if (!entry) continue;
+
+        const filePath = path.join(PDFS_DIR, entry.filename);
+        if (!fs.existsSync(filePath)) continue;
+
+        const stdBuffer = fs.readFileSync(filePath);
+        const stdDoc = await PDFDocument.load(stdBuffer);
+        const stdPages = await mergedDoc.copyPages(stdDoc, stdDoc.getPageIndices());
+        stdPages.forEach(p => mergedDoc.addPage(p));
+      }
+
+      const bytes = await mergedDoc.save();
+      res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="mesclado.pdf"' });
+      return res.send(Buffer.from(bytes));
+    }
+    // ── FIM MERGE ──────────────────────────────────────────────────────────
+
+    const bytes = await pdfDoc.save();
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="editado.pdf"' });
+    res.send(Buffer.from(bytes));
+
+  } catch (e) {
+    res.status(500).json({ error: 'Erro ao processar PDF.' });
+  }
+});
+
+// Adicionar PDF padrão (admin)
+app.post('/pdf-standards', authMiddleware, adminMiddleware, pdfUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
+  const { name, description } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Nome obrigatório.' });
+  const meta = loadStandardsMeta();
+  const newPdf = {
+    id: Date.now().toString(),
+    name: name.trim(),
+    description: description?.trim() || '',
+    filename: req.file.filename,
+    size: req.file.size,
+    created_at: new Date().toISOString(),
+  };
+  meta.push(newPdf);
+  saveStandardsMeta(meta);
+  res.status(201).json(newPdf);
+});
+
+// Remover PDF padrão (admin)
+app.delete('/pdf-standards/:id', authMiddleware, adminMiddleware, (req, res) => {
+  const meta = loadStandardsMeta();
+  const pdf = meta.find(p => p.id === req.params.id);
+  if (!pdf) return res.status(404).json({ error: 'PDF não encontrado.' });
+  const filePath = path.join(PDFS_DIR, pdf.filename);
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  saveStandardsMeta(meta.filter(p => p.id !== req.params.id));
+  res.json({ message: 'PDF removido.' });
+});
+
 // ─────────────────────────────────────────────
 // START
 // ─────────────────────────────────────────────
