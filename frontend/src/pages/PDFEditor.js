@@ -13,20 +13,36 @@ export default function PDFEditor() {
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const [dragover, setDragover] = useState(false);
+  
+  // NOVO: Estado para controlar quais PDFs promocionais foram selecionados
+  const [selectedPromos, setSelectedPromos] = useState([]); 
+  
   const inputRef = useRef();
+
+  // NOVO: Lista de PDFs promocionais disponíveis
+  const promoOptions = [
+    { id: 'gaiola', label: 'Catálogo - Gaiola' },
+    { id: 'manga', label: 'Catálogo - Manga' },
+    { id: 'manga-plissada', label: 'Catálogo - Manga Plissada' }
+  ];
 
   function handleFile(f) {
     if (!f) return;
     if (!f.name.toLowerCase().endsWith('.pdf')) { setError('Apenas arquivos PDF são aceitos.'); return; }
     setFile(f); setError(''); setSuccess('');
-    // Simula páginas (em produção o backend retorna o total)
     const mockPages = Array.from({length: 5}, (_,i) => i+1);
     setPages(mockPages);
     setSelectedPages([]);
+    setSelectedPromos([]); // Limpa a seleção de promos ao trocar de arquivo
   }
 
   function togglePage(p) {
     setSelectedPages(prev => prev.includes(p) ? prev.filter(x=>x!==p) : [...prev, p]);
+  }
+
+  // NOVO: Função para marcar/desmarcar os PDFs promocionais
+  function togglePromo(id) {
+    setSelectedPromos(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
 
   function selectAll() { setSelectedPages([...pages]); }
@@ -42,6 +58,9 @@ export default function PDFEditor() {
       if (action === 'watermark') formData.append('watermark', watermark);
       if (action === 'annotate') { formData.append('annotation', annotation); formData.append('annotationPage', annotationPage); }
       if (action === 'extract' && selectedPages.length > 0) formData.append('pages', JSON.stringify(selectedPages));
+      
+      // NOVO: Envia a lista de PDFs promocionais selecionados para o backend
+      if (action === 'mergePromo' && selectedPromos.length > 0) formData.append('promos', JSON.stringify(selectedPromos));
 
       const res = await fetch('http://localhost:3001/pdf-edit', { method:'POST', body: formData });
       if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Erro ao processar PDF.'); }
@@ -98,7 +117,7 @@ export default function PDFEditor() {
               <div className="file-selected-name">{file.name}</div>
               <div className="file-selected-size">{formatSize(file.size)} · {pages.length} páginas detectadas</div>
             </div>
-            <button className="file-remove" onClick={()=>{setFile(null);setPages([]);setSelectedPages([]);setSuccess('');}}><I d="M6 18L18 6M6 6l12 12"/></button>
+            <button className="file-remove" onClick={()=>{setFile(null);setPages([]);setSelectedPages([]);setSuccess('');setSelectedPromos([]);}}><I d="M6 18L18 6M6 6l12 12"/></button>
           </div>
         )}
         <input ref={inputRef} type="file" accept=".pdf" style={{display:'none'}} onChange={e=>handleFile(e.target.files[0])}/>
@@ -127,13 +146,39 @@ export default function PDFEditor() {
             </div>
           </div>
 
+          {/* NOVO CARD: Mesclar Material Promocional */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-header-icon"><I d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"/></div>
+              <div><div className="card-title">Anexar Material Promocional</div><div className="card-desc">Adicione catálogos ou fichas ao final da cotação</div></div>
+            </div>
+            
+            <div style={{display:'flex', flexDirection:'column', gap:10, marginBottom:15, padding: '5px 0'}}>
+              {promoOptions.map(promo => (
+                <label key={promo.id} style={{display:'flex', alignItems:'center', gap:8, fontSize:14, cursor:'pointer', color: 'var(--navy)'}}>
+                  <input
+                    type="checkbox"
+                    checked={selectedPromos.includes(promo.id)}
+                    onChange={() => togglePromo(promo.id)}
+                    style={{cursor:'pointer', width: 16, height: 16}}
+                  />
+                  {promo.label}
+                </label>
+              ))}
+            </div>
+
+            <button className="btn btn-secondary" style={{width:'auto', padding:'9px 16px', fontSize:13}} onClick={()=>handleDownload('mergePromo')} disabled={loading || selectedPromos.length === 0}>
+              {loading ? <><div className="spinner"/>Processando...</> : <><I d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>Mesclar PDFs</>}
+            </button>
+          </div>
+
           {/* Watermark */}
           <div className="card">
             <div className="card-header">
               <div className="card-header-icon"><I d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"/></div>
               <div><div className="card-title">Marca d'água</div><div className="card-desc">Texto exibido em todas as páginas</div></div>
             </div>
-            <input className="question-input" placeholder='Ex: CONFIDENCIAL, RASCUNHO, Inbrape 2026...' value={watermark} onChange={e=>setWatermark(e.target.value)}/>
+            <input className="question-input" placeholder='Ex: CONFIDENCIAL, RASCUNHO...' value={watermark} onChange={e=>setWatermark(e.target.value)}/>
             <button className="btn btn-secondary" style={{marginTop:10, width:'auto', padding:'9px 16px', fontSize:13}} onClick={()=>handleDownload('watermark')} disabled={loading || !watermark.trim()}>
               {loading ? <><div className="spinner"/>Processando...</> : <><I d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>Baixar com marca d'água</>}
             </button>
@@ -148,7 +193,7 @@ export default function PDFEditor() {
             <div style={{display:'flex', gap:10, marginBottom:10}}>
               <div style={{flex:1}}>
                 <label className="label"><I d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>Texto da anotação</label>
-                <input className="question-input" placeholder='Ex: Aprovado por Arthur Morais - 21/03/2026' value={annotation} onChange={e=>setAnnotation(e.target.value)}/>
+                <input className="question-input" placeholder='Ex: Aprovado por...' value={annotation} onChange={e=>setAnnotation(e.target.value)}/>
               </div>
               <div style={{width:90}}>
                 <label className="label"><I d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>Página</label>
