@@ -382,6 +382,68 @@ Responda em português de forma clara e estruturada.`;
 });
 
 // ─────────────────────────────────────────────
+// ANALYZE IMAGE
+// ─────────────────────────────────────────────
+app.post('/analyze-image', auth, upload.single('file'), async (req, res) => {
+  try {
+    const { mode, question } = req.body;
+    const { buffer, mimetype } = req.file;
+
+    const base64 = buffer.toString('base64');
+    const imageUrl = `data:${mimetype};base64,${base64}`;
+
+    const prompts = {
+      describe:      'Descreva esta imagem detalhadamente em português.',
+      extract_text:  'Extraia todo o texto visível nesta imagem. Retorne apenas o texto encontrado, preservando a formatação.',
+      analyze_chart: 'Analise este gráfico ou tabela. Descreva os dados, tendências e insights principais em português.',
+      identify:      'Identifique todos os objetos, elementos e características visíveis nesta imagem em português.',
+      quality:       'Avalie tecnicamente a qualidade desta imagem: nitidez, iluminação, composição, cores e pontos de melhoria.',
+      custom:        question || 'Descreva esta imagem.',
+    };
+
+    const prompt = prompts[mode] || prompts.describe;
+
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(500).json({ error: 'GROQ_API_KEY não configurada.' });
+    }
+
+    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: { url: imageUrl } },
+            ],
+          },
+        ],
+        max_tokens: 2000,
+        temperature: 0.2,
+      }),
+    });
+
+    const data = await r.json();
+
+    if (!r.ok) {
+      throw new Error(data.error?.message || 'Erro ao analisar imagem.');
+    }
+
+    const result = data.choices?.[0]?.message?.content;
+    res.json({ result });
+
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────
 // CHAT
 // ─────────────────────────────────────────────
 app.post('/chat', auth, async (req, res) => {
