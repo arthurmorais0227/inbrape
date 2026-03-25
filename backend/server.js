@@ -125,6 +125,94 @@ app.get('/auth/verify', auth, (req, res) => {
 });
 
 // ─────────────────────────────────────────────
+// ADMIN - USERS
+// ─────────────────────────────────────────────
+app.get('/admin/users', auth, admin, async (req, res) => {
+  const r = await pool.query(
+    `SELECT id, username, name, email, role, status,
+            created_at AS "createdAt", approved_at AS "approvedAt"
+     FROM users ORDER BY created_at DESC`
+  );
+  res.json(r.rows);
+});
+
+app.patch('/admin/users/:id/status', auth, admin, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  if (!['approved','rejected'].includes(status))
+    return res.status(400).json({ error: 'Status inválido' });
+
+  await pool.query(
+    `UPDATE users SET status=$1, approved_at=${status === 'approved' ? 'NOW()' : 'NULL'} WHERE id=$2`,
+    [status, id]
+  );
+  res.json({ ok: true });
+});
+
+app.patch('/admin/users/:id/password', auth, admin, async (req, res) => {
+  const { id } = req.params;
+  const { password } = req.body;
+  if (!password || password.length < 6)
+    return res.status(400).json({ error: 'Senha muito curta' });
+
+  const hash = await bcrypt.hash(password, 10);
+  await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, id]);
+  res.json({ ok: true });
+});
+
+app.delete('/admin/users/:id', auth, admin, async (req, res) => {
+  const { id } = req.params;
+  await pool.query('DELETE FROM users WHERE id=$1', [id]);
+  res.json({ ok: true });
+});
+
+// ─────────────────────────────────────────────
+// EXCEL-DATA (retorna linhas brutas para gráficos)
+// ─────────────────────────────────────────────
+app.post('/excel-data', auth, upload.single('file'), async (req, res) => {
+  try {
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const sheetName = wb.SheetNames[0];
+    const sheet = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+    if (!rows.length) throw new Error('Planilha vazia');
+
+    const columns = Object.keys(rows[0]);
+
+    res.json({
+      rows,
+      columns,
+      totalRows: rows.length,
+      sheetName,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// ANALYZE (texto livre — usado pelo gráfico IA)
+// ─────────────────────────────────────────────
+app.post('/analyze', auth, async (req, res) => {
+  const { text, mode } = req.body;
+  if (!text) return res.status(400).json({ error: 'Texto ausente' });
+
+  const prompt = mode === 'summary'
+    ? `Responda APENAS com JSON puro, sem markdown, sem explicação fora do JSON.\n\n${text}`
+    : text;
+
+  let result;
+  try {
+    result = await callNvidia(prompt);
+  } catch {
+    result = await callGroq(prompt);
+  }
+
+  res.json({ result });
+});
+
+// ─────────────────────────────────────────────
 // NVIDIA (principal)
 // ─────────────────────────────────────────────
 async function callNvidia(prompt) {
@@ -193,66 +281,98 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 app.post('/analyze-excel', auth, upload.single('file'), async (req, res) => {
   try {
-    const data = readExcel(req.file.buffer);
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const sheetName = wb.SheetNames[0];
+    const sheet = wb.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
     if (!data.length) throw new Error('Planilha vazia');
 
     const cols = Object.keys(data[0]);
-
-    // 🔥 resumo estatístico
     const summary = {};
 
     cols.forEach(col => {
       const values = data.map(r => r[col]).filter(v => v !== '');
-
       const nums = values.map(Number).filter(v => !isNaN(v));
-
       if (nums.length) {
         const sum = nums.reduce((a, b) => a + b, 0);
-        summary[col] = {
-          tipo: 'numérico',
-          min: Math.min(...nums),
-          max: Math.max(...nums),
-          media: sum / nums.length
-        };
+        summary[col] = { tipo:'numérico', min:Math.min(...nums), max:Math.max(...nums), media:sum/nums.length };
       } else {
         const freq = {};
-        values.forEach(v => freq[v] = (freq[v] || 0) + 1);
-
-        summary[col] = {
-          tipo: 'categórico',
-          top: Object.entries(freq)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 5)
-        };
+        values.forEach(v => freq[v] = (freq[v]||0) + 1);
+        summary[col] = { tipo:'categórico', top:Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,5) };
       }
     });
 
-    const sample = data.slice(0, 10);
-
-    const prompt = `
-Você é um analista de dados.
-
-Resumo:
-${JSON.stringify(summary, null, 2)}
-
-Amostra:
-${JSON.stringify(sample, null, 2)}
-
-Pergunta:
-${req.body.question || 'Gere insights estratégicos'}
-
-Responda em português.
-`;
+    const prompt = `Você é um analista de dados.\n\nResumo:\n${JSON.stringify(summary,null,2)}\n\nAmostra:\n${JSON.stringify(data.slice(0,10),null,2)}\n\nPergunta:\n${req.body.question||'Gere insights estratégicos'}\n\nResponda em português.`;
 
     let result;
+    try { result = await callNvidia(prompt); }
+    catch { result = await callGroq(prompt); }
 
-    try {
-      result = await callNvidia(prompt);
-    } catch {
-      result = await callGroq(prompt);
+    // ✅ agora retorna meta junto
+    res.json({
+      result,
+      summary,
+      meta: {
+        columns: cols,
+        totalRows: data.length,
+        sheetName,
+        fileName: req.file.originalname,
+      }
+    });
+
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// ANALYZE DOCUMENT (PDF, TXT, MD, CSV)
+// ─────────────────────────────────────────────
+const PDFParser = require('pdf2json');
+
+app.post('/analyze-document', auth, upload.single('file'), async (req, res) => {
+  try {
+    const { question } = req.body;
+    const { originalname, buffer } = req.file;
+    const ext = originalname.split('.').pop().toLowerCase();
+
+    let content = '';
+
+    if (ext === 'pdf') {
+      content = await new Promise((resolve, reject) => {
+        const parser = new PDFParser();
+        parser.on('pdfParser_dataReady', (data) => {
+          const text = data.Pages
+            .map(p => p.Texts.map(t => decodeURIComponent(t.R[0].T)).join(' '))
+            .join('\n');
+          resolve(text);
+        });
+        parser.on('pdfParser_dataError', reject);
+        parser.parseBuffer(buffer);
+      });
+    } else {
+      content = buffer.toString('utf-8');
     }
 
-    res.json({ result, summary });
+    if (!content.trim()) throw new Error('Não foi possível extrair texto do arquivo.');
+
+    const prompt = `Você é um analista especialista em documentos.
+
+Documento: "${originalname}"
+Conteúdo:
+${content.slice(0, 12000)}
+
+Pergunta/Instrução: ${question}
+
+Responda em português de forma clara e estruturada.`;
+
+    let result;
+    try { result = await callNvidia(prompt); }
+    catch { result = await callGroq(prompt); }
+
+    res.json({ result });
 
   } catch (e) {
     res.status(500).json({ error: e.message });
