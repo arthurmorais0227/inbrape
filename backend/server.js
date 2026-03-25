@@ -198,22 +198,61 @@ app.post('/excel-data', auth, upload.single('file'), async (req, res) => {
 // ─────────────────────────────────────────────
 // ANALYZE (texto livre — usado pelo gráfico IA)
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// ANALYZE (gráfico inteligente com agrupamento)
+// ─────────────────────────────────────────────
 app.post('/analyze', auth, async (req, res) => {
-  const { text, mode } = req.body;
-  if (!text) return res.status(400).json({ error: 'Texto ausente' });
+  const { text, mode, rows, columns } = req.body;
 
-  const prompt = mode === 'summary'
-    ? `Responda APENAS com JSON puro, sem markdown, sem explicação fora do JSON.\n\n${text}`
-    : text;
-
-  let result;
-  try {
-    result = await callNvidia(prompt);
-  } catch {
-    result = await callGroq(prompt);
+  if (mode !== 'summary' || !rows) {
+    // uso normal de texto
+    const prompt = text;
+    let result;
+    try { result = await callNvidia(prompt); }
+    catch { result = await callGroq(prompt); }
+    return res.json({ result });
   }
 
-  res.json({ result });
+  // modo gráfico: IA processa e agrupa os dados
+  const prompt = `Você é um especialista em análise de dados e visualização.
+
+O usuário quer: "${text}"
+
+Colunas disponíveis: ${columns.join(', ')}
+
+Dados completos (${rows.length} linhas):
+${JSON.stringify(rows.slice(0, 200))}
+
+Sua tarefa:
+1. Entenda o pedido do usuário
+2. Filtre as linhas relevantes se necessário (ex: produtos que contêm "gaiola" ou "manga")
+3. Agrupe e some os valores pela coluna de categoria escolhida
+4. Retorne APENAS um JSON válido, sem markdown, sem explicação fora do JSON:
+
+{
+  "chartType": "bar|line|pie|doughnut|pareto",
+  "labels": ["Categoria A", "Categoria B"],
+  "values": [100, 200],
+  "xCol": "nome da coluna usada como categoria",
+  "yCol": "nome da coluna somada",
+  "explanation": "explicação em português do que foi feito"
+}
+
+IMPORTANTE: os arrays labels e values devem ter o mesmo tamanho. Agrupe sempre — nunca retorne dados duplicados.`;
+
+  try {
+    let raw;
+    try { raw = await callNvidia(prompt); }
+    catch { raw = await callGroq(prompt); }
+
+    const match = (raw || '').match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('IA não retornou JSON válido.');
+
+    const config = JSON.parse(match[0]);
+    res.json({ result: raw, config });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─────────────────────────────────────────────

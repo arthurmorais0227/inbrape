@@ -295,27 +295,37 @@ export default function ExcelAnalyzer({ onNotify }) {
     finally { setLoadingChart(false); }
   }
 
-  async function handleAiChart() {
-    if (!chartPrompt.trim()) { setError('Digite o que você quer visualizar.'); return; }
-    if (!file) { setError('Selecione uma planilha primeiro.'); return; }
-    setLoadingAiChart(true); setError(''); setAiChartConfig(null); setAiChartMsg('');
-    try {
-      const rows = await loadRawData();
-      const cols = meta?.columns || Object.keys(rows[0]||{});
-      const token = localStorage.getItem('ai_token');
-      const prompt = `Especialista em visualização. Pedido: "${chartPrompt}"\nColunas: ${cols.join(', ')}\nDados (5 linhas): ${JSON.stringify(rows.slice(0,5))}\nResponda APENAS com JSON: {"chartType":"bar|line|pie|doughnut|pareto","xCol":"coluna","yCol":"coluna","explanation":"explicação em português"}`;
-      const r = await fetch(`${API_URL}/analyze`, { method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`}, body:JSON.stringify({text:prompt,mode:'summary'}) });
-      const data = await r.json();
-      const jsonMatch = (data.result||'').match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('IA não retornou configuração válida.');
-      const config = JSON.parse(jsonMatch[0]);
-      setAiChartConfig(config);
-      setAiChartMsg(config.explanation||'');
-      setShowChart(true);
-      onNotify?.('📈 Gráfico gerado pela IA!');
-    } catch { setError('Não foi possível interpretar o pedido. Tente ser mais específico.'); }
-    finally { setLoadingAiChart(false); }
-  }
+  // substitua handleAiChart por:
+async function handleAiChart() {
+  if (!chartPrompt.trim()) { setError('Digite o que você quer visualizar.'); return; }
+  if (!file) { setError('Selecione uma planilha primeiro.'); return; }
+  setLoadingAiChart(true); setError(''); setAiChartConfig(null); setAiChartMsg('');
+  try {
+    const rows = await loadRawData();
+    const cols = meta?.columns || Object.keys(rows[0] || {});
+    const token = localStorage.getItem('ai_token');
+
+    const r = await fetch(`${API_URL}/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        text: chartPrompt,
+        mode: 'summary',
+        rows,
+        columns: cols,
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Erro ao gerar gráfico.');
+    if (!data.config) throw new Error('IA não retornou configuração válida.');
+
+    setAiChartConfig(data.config);
+    setAiChartMsg(data.config.explanation || '');
+    setShowChart(true);
+    onNotify?.('📈 Gráfico gerado pela IA!');
+  } catch { setError('Não foi possível interpretar o pedido. Tente ser mais específico.'); }
+  finally { setLoadingAiChart(false); }
+}
 
   async function handleCopy() {
     await navigator.clipboard.writeText(result);
