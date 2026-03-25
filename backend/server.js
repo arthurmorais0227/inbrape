@@ -527,7 +527,7 @@ function saveStandardsMeta(data) {
 }
 
 // Listar PDFs padrão
-app.get('/pdf-standards', authMiddleware, (req, res) => {
+app.get('/pdf-standards', auth, (req, res) => {
   res.json(loadStandardsMeta());
 });
 
@@ -623,7 +623,7 @@ app.post('/pdf-edit', auth, upload.single('file'), async (req, res) => {
 });
 
 // Adicionar PDF padrão (admin)
-app.post('/pdf-standards', authMiddleware, adminMiddleware, pdfUpload.single('file'), (req, res) => {
+app.post('/pdf-standards', auth, admin, pdfUpload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
   const { name, description } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Nome obrigatório.' });
@@ -642,7 +642,7 @@ app.post('/pdf-standards', authMiddleware, adminMiddleware, pdfUpload.single('fi
 });
 
 // Remover PDF padrão (admin)
-app.delete('/pdf-standards/:id', authMiddleware, adminMiddleware, (req, res) => {
+app.delete('/pdf-standards/:id', auth, admin, (req, res) => {
   const meta = loadStandardsMeta();
   const pdf = meta.find(p => p.id === req.params.id);
   if (!pdf) return res.status(404).json({ error: 'PDF não encontrado.' });
