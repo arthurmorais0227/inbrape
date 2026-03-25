@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import StandardPDFs from './StandardPDFs'; // ← ajuste o caminho se necessário
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://inbrape-production.up.railway.app';
 
@@ -32,6 +33,7 @@ function Modal({ title, onClose, children }) {
 }
 
 export default function AdminPanel() {
+  const [tab, setTab] = useState('users'); // ← NOVO: controle de aba
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
@@ -102,90 +104,117 @@ export default function AdminPanel() {
 
   return (
     <div>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:24}}>
-        <div>
-          <h1 style={{fontSize:20,fontWeight:700,color:'#002855',display:'flex',alignItems:'center',gap:8,marginBottom:3}}>
-            <div style={{width:28,height:28,background:'#EAF0F8',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',color:'#002855'}}>
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:15,height:15}}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-            </div>
-            Gerenciar Usuários
-          </h1>
-          <p style={{fontSize:13,color:'#64748B'}}>{users.length} usuário(s) cadastrado(s){pending > 0 && <span style={{marginLeft:8,background:'#FFFBEB',color:'#D97706',border:'1px solid #FCD34D',borderRadius:20,padding:'1px 8px',fontSize:11,fontWeight:600}}>⚠ {pending} pendente(s)</span>}</p>
-        </div>
+      {/* ── ABAS ── */}
+      <div style={{display:'flex',gap:4,marginBottom:24,background:'#F1F5F9',borderRadius:12,padding:4,width:'fit-content'}}>
+        <button
+          onClick={()=>setTab('users')}
+          style={{display:'flex',alignItems:'center',gap:6,padding:'7px 16px',border:'none',borderRadius:9,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit',background:tab==='users'?'white':'transparent',color:tab==='users'?'#002855':'#94A3B8',boxShadow:tab==='users'?'0 1px 4px rgba(0,0,0,0.1)':'none',transition:'all 0.15s'}}
+        >
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:14,height:14}}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+          Usuários
+          {pending > 0 && <span style={{background:'#E87722',color:'white',borderRadius:10,padding:'0 5px',fontSize:10,fontWeight:700}}>{pending}</span>}
+        </button>
+        <button
+          onClick={()=>setTab('pdfs')}
+          style={{display:'flex',alignItems:'center',gap:6,padding:'7px 16px',border:'none',borderRadius:9,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit',background:tab==='pdfs'?'white':'transparent',color:tab==='pdfs'?'#002855':'#94A3B8',boxShadow:tab==='pdfs'?'0 1px 4px rgba(0,0,0,0.1)':'none',transition:'all 0.15s'}}
+        >
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:14,height:14}}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"/></svg>
+          PDFs Padrão
+        </button>
       </div>
 
-      {msg.text && (
-        <div style={{background: msg.type==='success'?'#ECFDF5':'#FEF2F2', border:`1px solid ${msg.type==='success'?'#6EE7B7':'#FCA5A5'}`, borderRadius:10, padding:'10px 14px', fontSize:13, color: msg.type==='success'?'#059669':'#DC2626', marginBottom:16, display:'flex', gap:7, alignItems:'center'}}>
-          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:14,height:14,flexShrink:0}}><path strokeLinecap="round" strokeLinejoin="round" d={msg.type==='success'?'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z':'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'}/></svg>
-          {msg.text}
-        </div>
-      )}
+      {/* ── ABA: PDFs Padrão ── */}
+      {tab === 'pdfs' && <StandardPDFs />}
 
-      <div style={{display:'flex',gap:6,marginBottom:18,background:'#F1F5F9',borderRadius:10,padding:3,width:'fit-content'}}>
-        {['all','pending','approved','rejected'].map(f => (
-          <button key={f} onClick={()=>setFilter(f)} style={{padding:'6px 14px',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit',background:filter===f?'white':'transparent',color:filter===f?'#002855':'#94A3B8',boxShadow:filter===f?'0 1px 4px rgba(0,0,0,0.1)':'none',transition:'all 0.15s'}}>
-            {f==='all'?'Todos':STATUS_COLORS[f]?.label}
-            {f==='pending' && pending > 0 && <span style={{marginLeft:5,background:'#E87722',color:'white',borderRadius:10,padding:'0 5px',fontSize:10}}>{pending}</span>}
-          </button>
-        ))}
-      </div>
-
-      {loading ? (
-        <div style={{textAlign:'center',padding:60,color:'#94A3B8'}}>Carregando...</div>
-      ) : filtered.length === 0 ? (
-        <div style={{textAlign:'center',padding:60,color:'#94A3B8'}}>Nenhum usuário encontrado.</div>
-      ) : (
-        <div style={{display:'flex',flexDirection:'column',gap:10}}>
-          {filtered.map(user => (
-            <div key={user.id} style={{background:'white',border:'1px solid #E2E8F0',borderRadius:14,padding:'16px 20px',boxShadow:'0 1px 4px rgba(0,40,85,0.06)',display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
-              <div style={{width:42,height:42,background: user.role==='admin'?'#002855':'#EAF0F8',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',color:user.role==='admin'?'white':'#002855',fontWeight:700,fontSize:16,flexShrink:0}}>
-                {user.name.charAt(0).toUpperCase()}
-              </div>
-              <div style={{flex:1,minWidth:160}}>
-                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
-                  <span style={{fontSize:14,fontWeight:600,color:'#1E293B'}}>{user.name}</span>
-                  {user.role === 'admin' && <span style={{background:'#002855',color:'white',borderRadius:6,padding:'1px 7px',fontSize:10,fontWeight:700}}>ADMIN</span>}
+      {/* ── ABA: Usuários ── */}
+      {tab === 'users' && (
+        <>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:24}}>
+            <div>
+              <h1 style={{fontSize:20,fontWeight:700,color:'#002855',display:'flex',alignItems:'center',gap:8,marginBottom:3}}>
+                <div style={{width:28,height:28,background:'#EAF0F8',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',color:'#002855'}}>
+                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:15,height:15}}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
                 </div>
-                <div style={{fontSize:12,color:'#94A3B8'}}>@{user.username} · {user.email}</div>
-                <div style={{fontSize:11,color:'#CBD5E1',marginTop:2}}>
-                  Criado em {new Date(user.createdAt).toLocaleDateString('pt-BR')}
-                  {user.approvedAt && ` · Aprovado em ${new Date(user.approvedAt).toLocaleDateString('pt-BR')}`}
-                </div>
-              </div>
-              <Badge status={user.status}/>
-              {user.role !== 'admin' && (
-                <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                  {user.status === 'pending' && (
-                    <>
-                      <button onClick={()=>updateStatus(user.id,'approved')} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#ECFDF5',border:'1px solid #6EE7B7',borderRadius:8,fontSize:12,fontWeight:600,color:'#059669',cursor:'pointer',fontFamily:'inherit'}}>
-                        <I d="M5 13l4 4L19 7"/>Aprovar
-                      </button>
-                      <button onClick={()=>updateStatus(user.id,'rejected')} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:8,fontSize:12,fontWeight:600,color:'#DC2626',cursor:'pointer',fontFamily:'inherit'}}>
-                        <I d="M6 18L18 6M6 6l12 12"/>Recusar
-                      </button>
-                    </>
-                  )}
-                  {user.status === 'approved' && (
-                    <button onClick={()=>updateStatus(user.id,'rejected')} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:8,fontSize:12,fontWeight:600,color:'#DC2626',cursor:'pointer',fontFamily:'inherit'}}>
-                      <I d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>Revogar
-                    </button>
-                  )}
-                  {user.status === 'rejected' && (
-                    <button onClick={()=>updateStatus(user.id,'approved')} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#ECFDF5',border:'1px solid #6EE7B7',borderRadius:8,fontSize:12,fontWeight:600,color:'#059669',cursor:'pointer',fontFamily:'inherit'}}>
-                      <I d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>Reativar
-                    </button>
-                  )}
-                  <button onClick={()=>{setModal({type:'password',user});setNewPass('');}} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#EAF0F8',border:'1px solid rgba(0,40,85,0.15)',borderRadius:8,fontSize:12,fontWeight:600,color:'#002855',cursor:'pointer',fontFamily:'inherit'}}>
-                    <I d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>Senha
-                  </button>
-                  <button onClick={()=>deleteUser(user.id)} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 10px',background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:8,fontSize:12,color:'#DC2626',cursor:'pointer',fontFamily:'inherit'}}>
-                    <I d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                  </button>
-                </div>
-              )}
+                Gerenciar Usuários
+              </h1>
+              <p style={{fontSize:13,color:'#64748B'}}>{users.length} usuário(s) cadastrado(s){pending > 0 && <span style={{marginLeft:8,background:'#FFFBEB',color:'#D97706',border:'1px solid #FCD34D',borderRadius:20,padding:'1px 8px',fontSize:11,fontWeight:600}}>⚠ {pending} pendente(s)</span>}</p>
             </div>
-          ))}
-        </div>
+          </div>
+
+          {msg.text && (
+            <div style={{background: msg.type==='success'?'#ECFDF5':'#FEF2F2', border:`1px solid ${msg.type==='success'?'#6EE7B7':'#FCA5A5'}`, borderRadius:10, padding:'10px 14px', fontSize:13, color: msg.type==='success'?'#059669':'#DC2626', marginBottom:16, display:'flex', gap:7, alignItems:'center'}}>
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{width:14,height:14,flexShrink:0}}><path strokeLinecap="round" strokeLinejoin="round" d={msg.type==='success'?'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z':'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'}/></svg>
+              {msg.text}
+            </div>
+          )}
+
+          <div style={{display:'flex',gap:6,marginBottom:18,background:'#F1F5F9',borderRadius:10,padding:3,width:'fit-content'}}>
+            {['all','pending','approved','rejected'].map(f => (
+              <button key={f} onClick={()=>setFilter(f)} style={{padding:'6px 14px',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit',background:filter===f?'white':'transparent',color:filter===f?'#002855':'#94A3B8',boxShadow:filter===f?'0 1px 4px rgba(0,0,0,0.1)':'none',transition:'all 0.15s'}}>
+                {f==='all'?'Todos':STATUS_COLORS[f]?.label}
+                {f==='pending' && pending > 0 && <span style={{marginLeft:5,background:'#E87722',color:'white',borderRadius:10,padding:'0 5px',fontSize:10}}>{pending}</span>}
+              </button>
+            ))}
+          </div>
+
+          {loading ? (
+            <div style={{textAlign:'center',padding:60,color:'#94A3B8'}}>Carregando...</div>
+          ) : filtered.length === 0 ? (
+            <div style={{textAlign:'center',padding:60,color:'#94A3B8'}}>Nenhum usuário encontrado.</div>
+          ) : (
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {filtered.map(user => (
+                <div key={user.id} style={{background:'white',border:'1px solid #E2E8F0',borderRadius:14,padding:'16px 20px',boxShadow:'0 1px 4px rgba(0,40,85,0.06)',display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
+                  <div style={{width:42,height:42,background: user.role==='admin'?'#002855':'#EAF0F8',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',color:user.role==='admin'?'white':'#002855',fontWeight:700,fontSize:16,flexShrink:0}}>
+                    {user.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{flex:1,minWidth:160}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
+                      <span style={{fontSize:14,fontWeight:600,color:'#1E293B'}}>{user.name}</span>
+                      {user.role === 'admin' && <span style={{background:'#002855',color:'white',borderRadius:6,padding:'1px 7px',fontSize:10,fontWeight:700}}>ADMIN</span>}
+                    </div>
+                    <div style={{fontSize:12,color:'#94A3B8'}}>@{user.username} · {user.email}</div>
+                    <div style={{fontSize:11,color:'#CBD5E1',marginTop:2}}>
+                      Criado em {new Date(user.createdAt).toLocaleDateString('pt-BR')}
+                      {user.approvedAt && ` · Aprovado em ${new Date(user.approvedAt).toLocaleDateString('pt-BR')}`}
+                    </div>
+                  </div>
+                  <Badge status={user.status}/>
+                  {user.role !== 'admin' && (
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                      {user.status === 'pending' && (
+                        <>
+                          <button onClick={()=>updateStatus(user.id,'approved')} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#ECFDF5',border:'1px solid #6EE7B7',borderRadius:8,fontSize:12,fontWeight:600,color:'#059669',cursor:'pointer',fontFamily:'inherit'}}>
+                            <I d="M5 13l4 4L19 7"/>Aprovar
+                          </button>
+                          <button onClick={()=>updateStatus(user.id,'rejected')} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:8,fontSize:12,fontWeight:600,color:'#DC2626',cursor:'pointer',fontFamily:'inherit'}}>
+                            <I d="M6 18L18 6M6 6l12 12"/>Recusar
+                          </button>
+                        </>
+                      )}
+                      {user.status === 'approved' && (
+                        <button onClick={()=>updateStatus(user.id,'rejected')} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:8,fontSize:12,fontWeight:600,color:'#DC2626',cursor:'pointer',fontFamily:'inherit'}}>
+                          <I d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>Revogar
+                        </button>
+                      )}
+                      {user.status === 'rejected' && (
+                        <button onClick={()=>updateStatus(user.id,'approved')} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#ECFDF5',border:'1px solid #6EE7B7',borderRadius:8,fontSize:12,fontWeight:600,color:'#059669',cursor:'pointer',fontFamily:'inherit'}}>
+                          <I d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>Reativar
+                        </button>
+                      )}
+                      <button onClick={()=>{setModal({type:'password',user});setNewPass('');}} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#EAF0F8',border:'1px solid rgba(0,40,85,0.15)',borderRadius:8,fontSize:12,fontWeight:600,color:'#002855',cursor:'pointer',fontFamily:'inherit'}}>
+                        <I d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>Senha
+                      </button>
+                      <button onClick={()=>deleteUser(user.id)} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 10px',background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:8,fontSize:12,color:'#DC2626',cursor:'pointer',fontFamily:'inherit'}}>
+                        <I d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {modal?.type === 'password' && (
