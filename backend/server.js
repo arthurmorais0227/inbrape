@@ -8,8 +8,12 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
+const PDFParser = require('pdf2json'); // ← adiciona isso também
 
 const app = express();
+
+// ✅ upload deve ficar AQUI, antes de qualquer rota
+const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors({
   origin: ['https://inbrape.vercel.app', 'http://localhost:3000'],
@@ -276,8 +280,7 @@ function readExcel(buffer) {
 
 // ─────────────────────────────────────────────
 // ANALYZE EXCEL (ULTRA OTIMIZADO)
-// ─────────────────────────────────────────────
-const upload = multer({ storage: multer.memoryStorage() });
+// ───────────────────────────────────────────--
 
 app.post('/analyze-excel', auth, upload.single('file'), async (req, res) => {
   try {
