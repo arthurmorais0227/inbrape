@@ -91,10 +91,16 @@ function ParetoChart({ data, xCol, yCol }) {
 }
 
 // ── MAIN CHART COMPONENT ──────────────────────
+// ── MAIN CHART COMPONENT ──────────────────────
 function ChartView({ data, columns, aiConfig }) {
   const [chartType, setChartType] = useState('bar');
   const [xCol, setXCol] = useState('');
   const [yCol, setYCol] = useState('');
+  
+  // Novos estados para Ordenação e Filtros
+  const [sortOrder, setSortOrder] = useState('none');
+  const [activeFilters, setActiveFilters] = useState({});
+  
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
 
@@ -103,6 +109,37 @@ function ChartView({ data, columns, aiConfig }) {
     return vals.filter(v => v !== '' && !isNaN(Number(v))).length > vals.length * 0.5;
   });
   const textCols = columns.filter(c => !numericCols.includes(c));
+
+  // Lógica: Detectar colunas para gerar filtros automáticos (ex: Status, Região) com até 15 valores únicos
+  const filterableCols = useMemo(() => {
+    return textCols.filter(col => {
+      const uniqueVals = new Set(data.map(r => r[col]).filter(v => v !== '' && v != null));
+      return uniqueVals.size > 0 && uniqueVals.size <= 15;
+    });
+  }, [data, textCols]);
+
+  // Lógica: Aplicar Filtros e Ordenação aos dados (mantém intacto o dado original)
+  const processedData = useMemo(() => {
+    let result = [...data];
+
+    // Aplicar Filtros Automáticos
+    Object.entries(activeFilters).forEach(([col, val]) => {
+      if (val) {
+        result = result.filter(r => String(r[col]) === String(val));
+      }
+    });
+
+    // Aplicar Ordenação (Pareto tem ordenação própria)
+    if (chartType !== 'pareto' && yCol) {
+      if (sortOrder === 'asc') {
+        result.sort((a, b) => (Number(a[yCol]) || 0) - (Number(b[yCol]) || 0));
+      } else if (sortOrder === 'desc') {
+        result.sort((a, b) => (Number(b[yCol]) || 0) - (Number(a[yCol]) || 0));
+      }
+    }
+
+    return result;
+  }, [data, activeFilters, sortOrder, yCol, chartType]);
 
   useEffect(() => {
     if (aiConfig) {
@@ -117,19 +154,24 @@ function ChartView({ data, columns, aiConfig }) {
 
   useEffect(() => {
     if (chartType === 'pareto') return;
-    if (!canvasRef.current || !xCol || !yCol || !data.length) return;
-    const labels = data.slice(0,20).map(r => String(r[xCol]||'').slice(0,15));
-    const values = data.slice(0,20).map(r => Number(r[yCol])||0);
+    if (!canvasRef.current || !xCol || !yCol || !processedData.length) return;
+    
+    // Agora usamos processedData em vez de data
+    const labels = processedData.slice(0,20).map(r => String(r[xCol]||'').slice(0,15));
+    const values = processedData.slice(0,20).map(r => Number(r[yCol])||0);
     const colors = ['#002855','#1B4F8A','#2E6DB4','#E87722','#F5A623','#059669','#DC2626','#7C3AED','#0891B2','#D97706'];
+    
     if (chartRef.current) { chartRef.current.destroy(); }
     const Chart = window.Chart;
     if (!Chart) return;
+    
     const config = {
       bar:      { type:'bar',      data:{ labels, datasets:[{ label:yCol, data:values, backgroundColor:colors, borderRadius:6, borderSkipped:false }] } },
       line:     { type:'line',     data:{ labels, datasets:[{ label:yCol, data:values, borderColor:'#002855', backgroundColor:'rgba(0,40,85,0.08)', tension:0.4, fill:true, pointBackgroundColor:'#E87722', pointRadius:4 }] } },
       pie:      { type:'pie',      data:{ labels, datasets:[{ data:values, backgroundColor:colors }] } },
       doughnut: { type:'doughnut', data:{ labels, datasets:[{ data:values, backgroundColor:colors }] } },
     };
+    
     chartRef.current = new Chart(canvasRef.current, {
       ...config[chartType],
       options: {
@@ -143,7 +185,7 @@ function ChartView({ data, columns, aiConfig }) {
         } : {},
       },
     });
-  }, [chartType, xCol, yCol, data]);
+  }, [chartType, xCol, yCol, processedData]);
 
   if (!data.length) return null;
 
@@ -154,6 +196,8 @@ function ChartView({ data, columns, aiConfig }) {
     {id:'doughnut', icon:'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', label:'Rosca'},
     {id:'pareto',   icon:'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z', label:'Pareto'},
   ];
+
+  const selectStyle = {padding:'6px 10px',border:'1.5px solid #E2E8F0',borderRadius:8,fontSize:12,color:'#475569',background:'white',fontFamily:'inherit',cursor:'pointer'};
 
   return (
     <div style={{marginTop:4}}>
@@ -175,7 +219,7 @@ function ChartView({ data, columns, aiConfig }) {
         </div>
       )}
 
-      {/* Controls */}
+      {/* Controls: Eixos + Novos Filtros integrados ao mesmo flex container */}
       <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:16}}>
         <div style={{display:'flex',background:'#F1F5F9',borderRadius:10,padding:3,gap:2,flexWrap:'wrap'}}>
           {CHART_TYPES.map(t => (
@@ -184,32 +228,52 @@ function ChartView({ data, columns, aiConfig }) {
             </button>
           ))}
         </div>
-        <select value={xCol} onChange={e=>setXCol(e.target.value)} style={{padding:'6px 10px',border:'1.5px solid #E2E8F0',borderRadius:8,fontSize:12,color:'#475569',background:'white',fontFamily:'inherit',cursor:'pointer'}}>
+        
+        {/* Eixos Originais */}
+        <select value={xCol} onChange={e=>setXCol(e.target.value)} style={selectStyle}>
           <option value="">Eixo X</option>
           {columns.map(c=><option key={c} value={c}>{c}</option>)}
         </select>
-        <select value={yCol} onChange={e=>setYCol(e.target.value)} style={{padding:'6px 10px',border:'1.5px solid #E2E8F0',borderRadius:8,fontSize:12,color:'#475569',background:'white',fontFamily:'inherit',cursor:'pointer'}}>
+        <select value={yCol} onChange={e=>setYCol(e.target.value)} style={selectStyle}>
           <option value="">Eixo Y (valor)</option>
           {numericCols.map(c=><option key={c} value={c}>{c}</option>)}
         </select>
+
+        {/* --- NOVO: Ordenação --- */}
+        <select value={sortOrder} onChange={e=>setSortOrder(e.target.value)} disabled={chartType === 'pareto'} style={selectStyle}>
+          <option value="none">Ordenação Padrão</option>
+          <option value="asc">Menor para Maior</option>
+          <option value="desc">Maior para Menor</option>
+        </select>
+
+        {/* --- NOVO: Filtros Automáticos baseados na planilha --- */}
+        {filterableCols.map(col => {
+          const uniqueValues = Array.from(new Set(data.map(r => r[col]).filter(Boolean))).sort();
+          return (
+            <select key={col} value={activeFilters[col] || ''} onChange={e => setActiveFilters(prev => ({...prev, [col]: e.target.value}))} style={selectStyle}>
+              <option value="">Filtro: {col}</option>
+              {uniqueValues.map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+          );
+        })}
       </div>
 
       {/* Canvas */}
       <div style={{background:'white',border:'1px solid #E2E8F0',borderRadius:12,padding:20,height:320}}>
         {chartType === 'pareto'
-          ? <ParetoChart data={data} xCol={xCol} yCol={yCol}/>
+          ? <ParetoChart data={processedData} xCol={xCol} yCol={yCol}/>
           : <canvas ref={canvasRef}/>
         }
       </div>
 
-      {/* Stats */}
+      {/* Stats - Usando processedData para atualizar junto com os filtros */}
       {yCol && (
         <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginTop:12}}>
           {[
-            {label:'Total',  value: data.reduce((s,r)=>s+(Number(r[yCol])||0),0).toLocaleString('pt-BR',{maximumFractionDigits:2})},
-            {label:'Média',  value: (data.reduce((s,r)=>s+(Number(r[yCol])||0),0)/Math.max(1,data.filter(r=>r[yCol]!=='').length)).toLocaleString('pt-BR',{maximumFractionDigits:2})},
-            {label:'Máximo', value: Math.max(...data.map(r=>Number(r[yCol])||0)).toLocaleString('pt-BR',{maximumFractionDigits:2})},
-            {label:'Mínimo', value: Math.min(...data.filter(r=>r[yCol]!=='').map(r=>Number(r[yCol])||0)).toLocaleString('pt-BR',{maximumFractionDigits:2})},
+            {label:'Total',  value: processedData.reduce((s,r)=>s+(Number(r[yCol])||0),0).toLocaleString('pt-BR',{maximumFractionDigits:2})},
+            {label:'Média',  value: (processedData.reduce((s,r)=>s+(Number(r[yCol])||0),0)/Math.max(1,processedData.filter(r=>r[yCol]!=='').length)).toLocaleString('pt-BR',{maximumFractionDigits:2})},
+            {label:'Máximo', value: (processedData.length ? Math.max(...processedData.map(r=>Number(r[yCol])||0)) : 0).toLocaleString('pt-BR',{maximumFractionDigits:2})},
+            {label:'Mínimo', value: (processedData.length ? Math.min(...processedData.filter(r=>r[yCol]!=='').map(r=>Number(r[yCol])||0)) : 0).toLocaleString('pt-BR',{maximumFractionDigits:2})},
           ].map(s=>(
             <div key={s.label} style={{background:'white',border:'1px solid #E2E8F0',borderRadius:10,padding:'10px 14px',textAlign:'center'}}>
               <div style={{fontSize:16,fontWeight:700,color:'#002855'}}>{s.value}</div>
