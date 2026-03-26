@@ -121,6 +121,39 @@ app.post('/auth/login', async (req, res) => {
 });
 });
 
+app.post('/auth/register', async (req, res) => {
+  try {
+    const { username, name, email, password } = req.body;
+
+    if (!username || !name || !email || !password) {
+      return res.status(400).json({ error: 'Dados obrigatórios faltando' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+
+    await pool.query(
+      `INSERT INTO users (username, name, email, password_hash)
+       VALUES ($1, $2, $3, $4)`,
+      [username, name, email, hash]
+    );
+
+    res.status(201).json({
+      message: 'Usuário criado! Aguarde aprovação do admin.'
+    });
+
+  } catch (e) {
+    if (e.code === '23505') {
+      return res.status(400).json({ error: 'Usuário ou email já existe' });
+    }
+
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // 👇 ADICIONA ISSO AQUI
 app.get('/auth/verify', auth, (req, res) => {
   res.json({
