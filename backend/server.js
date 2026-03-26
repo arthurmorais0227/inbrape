@@ -380,7 +380,26 @@ app.post('/analyze-excel', auth, upload.single('file'), async (req, res) => {
       }
     });
 
-    const prompt = `Você é um analista de dados.\n\nResumo:\n${JSON.stringify(summary,null,2)}\n\nAmostra:\n${JSON.stringify(data.slice(0,10),null,2)}\n\nPergunta:\n${req.body.question||'Gere insights estratégicos'}\n\nResponda em português.`;
+    const prompt = `
+Você é um analista de dados.
+
+IMPORTANTE:
+- O resumo abaixo foi calculado com TODOS os ${data.length} registros da planilha.
+- NÃO use apenas a amostra.
+- Use o resumo como base principal.
+- A amostra é apenas ilustrativa.
+
+Resumo completo (base real dos dados):
+${JSON.stringify(summary,null,2)}
+
+Exemplo de linhas (apenas referência):
+${JSON.stringify(data.slice(0,10),null,2)}
+
+Pergunta:
+${req.body.question || 'Gere insights estratégicos'}
+
+Responda considerando TODOS os dados.
+`;
 
     let result;
     try { result = await callNvidia(prompt); }
