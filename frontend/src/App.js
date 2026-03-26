@@ -165,7 +165,7 @@ const NOTIFY_CONFIGS = {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState("text");
+  const [activeTab, setActiveTab] = useState("pdf");
   const [pendingCount, setPendingCount] = useState(0);
   const [notifications, setNotifications] = useState([]);
 
