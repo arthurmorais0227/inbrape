@@ -499,32 +499,64 @@ app.post('/chat', auth, async (req, res) => {
   res.json({ result });
 });
 
-// ── PDF STANDARDS (adicionar antes do app.listen) ─────────────────────────────
+/// ── PDF STANDARDS ─────────────────────────────────────────────────────────────
 
-const PDFS_DIR = path.join(__dirname, 'pdf_standards');
-if (!fs.existsSync(PDFS_DIR)) fs.mkdirSync(PDFS_DIR, { recursive: true });
+async function initPDFStandardsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pdf_standards (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(300) NOT NULL,
+      description TEXT DEFAULT '',
+      filename VARCHAR(300) NOT NULL,
+      size INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+}
 
-const pdfUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, PDFS_DIR),
-    filename: (req, file, cb) => cb(null, `${Date.now()}_${file.originalname.replace(/\s/g,'_')}`),
-  }),
-  limits: { fileSize: 50 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf') cb(null, true);
-    else cb(new Error('Apenas PDFs são aceitos.'));
-  },
+// Listar PDFs padrão
+app.get('/pdf-standards', auth, async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT id, name, description, filename, size, created_at FROM pdf_standards ORDER BY created_at DESC'
+    );
+    res.json(r.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-const PDF_STANDARDS_FILE = path.join(__dirname, 'pdf_standards_meta.json');
+// Adicionar PDF padrão (admin)
+app.post('/pdf-standards', auth, admin, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
+    const { name, description } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Nome obrigatório.' });
+    if (req.file.mimetype !== 'application/pdf')
+      return res.status(400).json({ error: 'Apenas PDFs são aceitos.' });
 
-function loadStandardsMeta() {
-  if (!fs.existsSync(PDF_STANDARDS_FILE)) return [];
-  return JSON.parse(fs.readFileSync(PDF_STANDARDS_FILE, 'utf-8'));
-}
-function saveStandardsMeta(data) {
-  fs.writeFileSync(PDF_STANDARDS_FILE, JSON.stringify(data, null, 2));
-}
+    const r = await pool.query(
+      `INSERT INTO pdf_standards (name, description, filename, size, data)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id, name, description, filename, size, created_at`,
+      [name.trim(), description?.trim() || '', req.file.originalname, req.file.size, req.file.buffer]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Remover PDF padrão (admin)
+app.delete('/pdf-standards/:id', auth, admin, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM pdf_standards WHERE id=$1 RETURNING id', [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'PDF não encontrado.' });
+    res.json({ message: 'PDF removido.' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Listar PDFs padrão
 app.get('/pdf-standards', auth, (req, res) => {
@@ -583,34 +615,30 @@ app.post('/pdf-edit', auth, upload.single('file'), async (req, res) => {
 
     // ── MERGE COM PDFs PADRÃO ──────────────────────────────────────────────
     if (action === 'merge_standards') {
-      const { standardIds } = req.body; // array de IDs enviado pelo cliente
-      const ids = standardIds ? JSON.parse(standardIds) : [];
-      const meta = loadStandardsMeta();
+  const { standardIds } = req.body;
+  const ids = standardIds ? JSON.parse(standardIds) : [];
+  if (!ids.length) throw new Error('Nenhum PDF selecionado.');
 
-      const mergedDoc = await PDFDocument.create();
+  const mergedDoc = await PDFDocument.create();
 
-      // Copia páginas do PDF enviado pelo usuário
-      const userPages = await mergedDoc.copyPages(pdfDoc, pdfDoc.getPageIndices());
-      userPages.forEach(p => mergedDoc.addPage(p));
+  // Copia páginas do PDF do usuário
+  const userPages = await mergedDoc.copyPages(pdfDoc, pdfDoc.getPageIndices());
+  userPages.forEach(p => mergedDoc.addPage(p));
 
-      // Copia páginas de cada PDF padrão selecionado
-      for (const id of ids) {
-        const entry = meta.find(m => m.id === id);
-        if (!entry) continue;
+  // Busca cada PDF padrão direto do banco
+  for (const id of ids) {
+    const r = await pool.query('SELECT data FROM pdf_standards WHERE id=$1', [id]);
+    if (!r.rows.length) continue;
 
-        const filePath = path.join(PDFS_DIR, entry.filename);
-        if (!fs.existsSync(filePath)) continue;
+    const stdDoc = await PDFDocument.load(r.rows[0].data);
+    const stdPages = await mergedDoc.copyPages(stdDoc, stdDoc.getPageIndices());
+    stdPages.forEach(p => mergedDoc.addPage(p));
+  }
 
-        const stdBuffer = fs.readFileSync(filePath);
-        const stdDoc = await PDFDocument.load(stdBuffer);
-        const stdPages = await mergedDoc.copyPages(stdDoc, stdDoc.getPageIndices());
-        stdPages.forEach(p => mergedDoc.addPage(p));
-      }
-
-      const bytes = await mergedDoc.save();
-      res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="mesclado.pdf"' });
-      return res.send(Buffer.from(bytes));
-    }
+  const bytes = await mergedDoc.save();
+  res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="mesclado.pdf"' });
+  return res.send(Buffer.from(bytes));
+}
     // ── FIM MERGE ──────────────────────────────────────────────────────────
 
     const bytes = await pdfDoc.save();
@@ -655,7 +683,8 @@ app.delete('/pdf-standards/:id', auth, admin, (req, res) => {
 // ─────────────────────────────────────────────
 // START
 // ─────────────────────────────────────────────
-initDB().then(() => {
+iinitDB().then(async () => {
+  await initPDFStandardsTable();
   app.listen(PORT, () => {
     console.log(`🚀 Server rodando na porta ${PORT}`);
   });
