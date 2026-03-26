@@ -118,7 +118,7 @@ function ChartView({ data, columns, aiConfig }) {
     }
   }, [columns, aiConfig]);
 
-  // 🔥 NOVO: processamento com ordenação
+  // 🔥 ORDENAÇÃO
   const processedData = React.useMemo(() => {
     let d = [...data].filter(r => r[yCol] !== '' && !isNaN(Number(r[yCol])));
 
@@ -235,14 +235,80 @@ function ChartView({ data, columns, aiConfig }) {
   return (
     <div style={{marginTop:4}}>
 
-      {/* 🔥 NOVO: controle de ordenação */}
-      <div style={{ display:'flex', gap:10, marginBottom:12 }}>
-        <select value={sortType} onChange={e => setSortType(e.target.value)}>
-          <option value="desc">Maior valor</option>
-          <option value="asc">Menor valor</option>
-          <option value="az">A → Z</option>
-          <option value="za">Z → A</option>
+      {/* 🔥 CONTROLES TOP (bonitos agora) */}
+      <div style={{
+        display:'flex',
+        gap:10,
+        flexWrap:'wrap',
+        marginBottom:16,
+        alignItems:'center'
+      }}>
+
+        {/* Tipo de ordenação estilizado */}
+        <div style={{
+          display:'flex',
+          gap:6,
+          background:'#F1F5F9',
+          padding:4,
+          borderRadius:10
+        }}>
+          {[
+            {id:'desc', label:'Maior'},
+            {id:'asc', label:'Menor'},
+            {id:'az', label:'A-Z'},
+            {id:'za', label:'Z-A'},
+          ].map(opt => (
+            <button
+              key={opt.id}
+              onClick={() => setSortType(opt.id)}
+              style={{
+                padding:'6px 10px',
+                fontSize:11,
+                border:'none',
+                borderRadius:8,
+                cursor:'pointer',
+                background: sortType === opt.id ? 'white' : 'transparent',
+                color: sortType === opt.id ? '#002855' : '#64748B',
+                fontWeight:600,
+                boxShadow: sortType === opt.id ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* SELECTS RESTAURADOS */}
+        <select
+          value={xCol}
+          onChange={e=>setXCol(e.target.value)}
+          style={{
+            padding:'6px 10px',
+            border:'1.5px solid #E2E8F0',
+            borderRadius:8,
+            fontSize:12,
+            color:'#475569'
+          }}
+        >
+          <option value="">Eixo X</option>
+          {columns.map(c=><option key={c} value={c}>{c}</option>)}
         </select>
+
+        <select
+          value={yCol}
+          onChange={e=>setYCol(e.target.value)}
+          style={{
+            padding:'6px 10px',
+            border:'1.5px solid #E2E8F0',
+            borderRadius:8,
+            fontSize:12,
+            color:'#475569'
+          }}
+        >
+          <option value="">Eixo Y</option>
+          {numericCols.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
+
       </div>
 
       {/* Canvas */}
