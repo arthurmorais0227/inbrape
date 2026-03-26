@@ -683,7 +683,7 @@ app.delete('/pdf-standards/:id', auth, admin, (req, res) => {
 // ─────────────────────────────────────────────
 // START
 // ─────────────────────────────────────────────
-iinitDB().then(async () => {
+initDB().then(async () => {
   await initPDFStandardsTable();
   app.listen(PORT, () => {
     console.log(`🚀 Server rodando na porta ${PORT}`);
