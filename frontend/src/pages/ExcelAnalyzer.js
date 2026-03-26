@@ -95,7 +95,7 @@ function ChartView({ data, columns, aiConfig }) {
   const [chartType, setChartType] = useState('bar');
   const [xCol, setXCol] = useState('');
   const [yCol, setYCol] = useState('');
-  const [sortType, setSortType] = useState('desc'); // 🔥 NOVO
+  const [sortType, setSortType] = useState('desc');
 
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
@@ -118,25 +118,15 @@ function ChartView({ data, columns, aiConfig }) {
     }
   }, [columns, aiConfig]);
 
-  // 🔥 ORDENAÇÃO
   const processedData = React.useMemo(() => {
     let d = [...data].filter(r => r[yCol] !== '' && !isNaN(Number(r[yCol])));
 
     switch (sortType) {
-      case 'desc':
-        d.sort((a, b) => Number(b[yCol]) - Number(a[yCol]));
-        break;
-      case 'asc':
-        d.sort((a, b) => Number(a[yCol]) - Number(b[yCol]));
-        break;
-      case 'az':
-        d.sort((a, b) => String(a[xCol]).localeCompare(String(b[xCol])));
-        break;
-      case 'za':
-        d.sort((a, b) => String(b[xCol]).localeCompare(String(a[xCol])));
-        break;
-      default:
-        break;
+      case 'desc': d.sort((a,b)=>Number(b[yCol])-Number(a[yCol])); break;
+      case 'asc': d.sort((a,b)=>Number(a[yCol])-Number(b[yCol])); break;
+      case 'az': d.sort((a,b)=>String(a[xCol]).localeCompare(String(b[xCol]))); break;
+      case 'za': d.sort((a,b)=>String(b[xCol]).localeCompare(String(a[xCol]))); break;
+      default: break;
     }
 
     return d.slice(0, 20);
@@ -157,67 +147,15 @@ function ChartView({ data, columns, aiConfig }) {
     if (!Chart) return;
 
     const config = {
-      bar: {
-        type: 'bar',
-        data: {
-          labels,
-          datasets: [{
-            label: yCol,
-            data: values,
-            backgroundColor: colors,
-            borderRadius: 6,
-            borderSkipped: false
-          }]
-        }
-      },
-      line: {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [{
-            label: yCol,
-            data: values,
-            borderColor: '#002855',
-            backgroundColor: 'rgba(0,40,85,0.08)',
-            tension: 0.4,
-            fill: true,
-            pointBackgroundColor: '#E87722',
-            pointRadius: 4
-          }]
-        }
-      },
-      pie: {
-        type: 'pie',
-        data: {
-          labels,
-          datasets: [{ data: values, backgroundColor: colors }]
-        }
-      },
-      doughnut: {
-        type: 'doughnut',
-        data: {
-          labels,
-          datasets: [{ data: values, backgroundColor: colors }]
-        }
-      },
+      bar: { type:'bar', data:{ labels, datasets:[{ label:yCol, data:values, backgroundColor:colors, borderRadius:6 }] } },
+      line:{ type:'line', data:{ labels, datasets:[{ label:yCol, data:values, borderColor:'#002855', backgroundColor:'rgba(0,40,85,0.08)', tension:0.4, fill:true }] } },
+      pie:{ type:'pie', data:{ labels, datasets:[{ data:values, backgroundColor:colors }] } },
+      doughnut:{ type:'doughnut', data:{ labels, datasets:[{ data:values, backgroundColor:colors }] } },
     };
 
     chartRef.current = new Chart(canvasRef.current, {
       ...config[chartType],
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: chartType === 'pie' || chartType === 'doughnut' ? 'right' : 'top',
-            labels: { font: { family: 'Inter,sans-serif', size: 12 }, color: '#475569' }
-          },
-        },
-        scales: chartType === 'bar' || chartType === 'line' ? {
-          x: { ticks: { color: '#94A3B8', font: { size: 11 } }, grid: { color: '#F1F5F9' } },
-          y: { ticks: { color: '#94A3B8', font: { size: 11 } }, grid: { color: '#F1F5F9' } },
-        } : {},
-      },
+      options:{ responsive:true, maintainAspectRatio:false }
     });
 
   }, [chartType, xCol, yCol, processedData]);
@@ -235,7 +173,7 @@ function ChartView({ data, columns, aiConfig }) {
   return (
     <div style={{marginTop:4}}>
 
-      {/* 🔥 CONTROLES TOP (bonitos agora) */}
+      {/* 🔥 LINHA COMPLETA DE CONTROLES */}
       <div style={{
         display:'flex',
         gap:10,
@@ -244,7 +182,36 @@ function ChartView({ data, columns, aiConfig }) {
         alignItems:'center'
       }}>
 
-        {/* Tipo de ordenação estilizado */}
+        {/* TIPOS DE GRÁFICO (RESTAURADO) */}
+        <div style={{
+          display:'flex',
+          background:'#F1F5F9',
+          borderRadius:10,
+          padding:3,
+          gap:2
+        }}>
+          {CHART_TYPES.map(t => (
+            <button
+              key={t.id}
+              onClick={()=>setChartType(t.id)}
+              style={{
+                padding:'6px 10px',
+                fontSize:11,
+                border:'none',
+                borderRadius:8,
+                cursor:'pointer',
+                background: chartType===t.id ? 'white' : 'transparent',
+                color: chartType===t.id ? '#002855' : '#64748B',
+                fontWeight:600,
+                boxShadow: chartType===t.id ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ORDENAÇÃO */}
         <div style={{
           display:'flex',
           gap:6,
@@ -278,40 +245,20 @@ function ChartView({ data, columns, aiConfig }) {
           ))}
         </div>
 
-        {/* SELECTS RESTAURADOS */}
-        <select
-          value={xCol}
-          onChange={e=>setXCol(e.target.value)}
-          style={{
-            padding:'6px 10px',
-            border:'1.5px solid #E2E8F0',
-            borderRadius:8,
-            fontSize:12,
-            color:'#475569'
-          }}
-        >
+        {/* SELECTS */}
+        <select value={xCol} onChange={e=>setXCol(e.target.value)}>
           <option value="">Eixo X</option>
           {columns.map(c=><option key={c} value={c}>{c}</option>)}
         </select>
 
-        <select
-          value={yCol}
-          onChange={e=>setYCol(e.target.value)}
-          style={{
-            padding:'6px 10px',
-            border:'1.5px solid #E2E8F0',
-            borderRadius:8,
-            fontSize:12,
-            color:'#475569'
-          }}
-        >
+        <select value={yCol} onChange={e=>setYCol(e.target.value)}>
           <option value="">Eixo Y</option>
           {numericCols.map(c=><option key={c} value={c}>{c}</option>)}
         </select>
 
       </div>
 
-      {/* Canvas */}
+      {/* CANVAS */}
       <div style={{background:'white',border:'1px solid #E2E8F0',borderRadius:12,padding:20,height:320}}>
         {chartType === 'pareto'
           ? <ParetoChart data={processedData} xCol={xCol} yCol={yCol}/>
