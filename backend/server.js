@@ -651,7 +651,7 @@ app.post('/pdf-edit', auth, upload.single('file'), async (req, res) => {
 });
 
 // Adicionar PDF padrão (admin)
-app.post('/pdf-standards', auth, admin, pdfUpload.single('file'), (req, res) => {
+app.post('/pdf-standards', auth, admin, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
   const { name, description } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Nome obrigatório.' });
