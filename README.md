@@ -89,6 +89,4 @@ O app abrirá em `http://localhost:3000`
 
 ---
 
-## Licença
 
-MIT
