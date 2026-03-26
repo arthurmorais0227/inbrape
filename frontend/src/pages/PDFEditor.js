@@ -195,7 +195,7 @@ export default function PDFEditor() {
                   ))}
                 </div>
                 <button
-                  className="btn btn-secondary"
+                  className="btn btn-success"
                   style={{width:'auto', padding:'9px 16px', fontSize:13}}
                   onClick={()=>handleDownload('merge_standards')}
                   disabled={loading || selectedPromos.length === 0}
