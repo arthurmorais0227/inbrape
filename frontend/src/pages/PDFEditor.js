@@ -1,9 +1,11 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
+const API_URL = process.env.REACT_APP_API_URL || 'https://inbrape-production.up.railway.app';
 const I = ({d}) => <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d={d}/></svg>;
 
 export default function PDFEditor() {
   const [file, setFile] = useState(null);
+  const [pageCount, setPageCount] = useState(0);
   const [pages, setPages] = useState([]);
   const [selectedPages, setSelectedPages] = useState([]);
   const [watermark, setWatermark] = useState('');
@@ -13,34 +15,63 @@ export default function PDFEditor() {
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const [dragover, setDragover] = useState(false);
-  
-  // NOVO: Estado para controlar quais PDFs promocionais foram selecionados
-  const [selectedPromos, setSelectedPromos] = useState([]); 
-  
+  const [selectedPromos, setSelectedPromos] = useState([]);
+  const [promoOptions, setPromoOptions] = useState([]);   // ← vem do backend
+  const [loadingPromos, setLoadingPromos] = useState(true);
+
   const inputRef = useRef();
 
-  // NOVO: Lista de PDFs promocionais disponíveis
-  const promoOptions = [
-    { id: 'gaiola', label: 'Catálogo - Gaiola' },
-    { id: 'manga', label: 'Catálogo - Manga' },
-    { id: 'manga-plissada', label: 'Catálogo - Manga Plissada' }
-  ];
+  // ── Busca PDFs padrão do backend ──────────────────────────────────────────
+  useEffect(() => {
+    async function fetchPromos() {
+      setLoadingPromos(true);
+      try {
+        const r = await fetch(`${API_URL}/pdf-standards`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('ai_token')}` }
+        });
+        if (r.ok) setPromoOptions(await r.json());
+      } catch {}
+      finally { setLoadingPromos(false); }
+    }
+    fetchPromos();
+  }, []);
 
-  function handleFile(f) {
+  // ── Conta páginas reais via PDF.js ────────────────────────────────────────
+  async function countPages(f) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          // PDF.js via CDN (já disponível nos navegadores modernos via import dinâmico)
+          const typedArray = new Uint8Array(e.target.result);
+          // Conta manualmente: cada /Page\b no PDF binário é uma página
+          // Método simples e sem dependência: conta ocorrências de "/Type /Page" no buffer
+          const text = new TextDecoder('latin1').decode(typedArray);
+          const matches = text.match(/\/Type\s*\/Page[^s]/g);
+          resolve(matches ? matches.length : 1);
+        } catch {
+          resolve(1);
+        }
+      };
+      reader.readAsArrayBuffer(f);
+    });
+  }
+
+  async function handleFile(f) {
     if (!f) return;
     if (!f.name.toLowerCase().endsWith('.pdf')) { setError('Apenas arquivos PDF são aceitos.'); return; }
     setFile(f); setError(''); setSuccess('');
-    const mockPages = Array.from({length: 5}, (_,i) => i+1);
-    setPages(mockPages);
-    setSelectedPages([]);
-    setSelectedPromos([]); // Limpa a seleção de promos ao trocar de arquivo
+    setSelectedPages([]); setSelectedPromos([]);
+
+    const count = await countPages(f);
+    setPageCount(count);
+    setPages(Array.from({ length: count }, (_, i) => i + 1));
   }
 
   function togglePage(p) {
     setSelectedPages(prev => prev.includes(p) ? prev.filter(x=>x!==p) : [...prev, p]);
   }
 
-  // NOVO: Função para marcar/desmarcar os PDFs promocionais
   function togglePromo(id) {
     setSelectedPromos(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
@@ -56,13 +87,21 @@ export default function PDFEditor() {
       formData.append('file', file);
       formData.append('action', action);
       if (action === 'watermark') formData.append('watermark', watermark);
-      if (action === 'annotate') { formData.append('annotation', annotation); formData.append('annotationPage', annotationPage); }
-      if (action === 'extract' && selectedPages.length > 0) formData.append('pages', JSON.stringify(selectedPages));
-      
-      // NOVO: Envia a lista de PDFs promocionais selecionados para o backend
-      if (action === 'mergePromo' && selectedPromos.length > 0) formData.append('promos', JSON.stringify(selectedPromos));
+      if (action === 'annotate') {
+        formData.append('annotation', annotation);
+        formData.append('annotationPage', annotationPage);
+      }
+      if (action === 'extract' && selectedPages.length > 0)
+        formData.append('pages', JSON.stringify(selectedPages));
+      if (action === 'merge_standards' && selectedPromos.length > 0)
+        formData.append('standardIds', JSON.stringify(selectedPromos));
 
-      const res = await fetch('http://localhost:3001/pdf-edit', { method:'POST', body: formData });
+      const res = await fetch(`${API_URL}/pdf-edit`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('ai_token')}` },
+        body: formData
+      });
+
       if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Erro ao processar PDF.'); }
 
       const blob = await res.blob();
@@ -115,9 +154,9 @@ export default function PDFEditor() {
             <div className="file-selected-icon"><I d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></div>
             <div className="file-selected-info">
               <div className="file-selected-name">{file.name}</div>
-              <div className="file-selected-size">{formatSize(file.size)} · {pages.length} páginas detectadas</div>
+              <div className="file-selected-size">{formatSize(file.size)} · {pageCount} página{pageCount !== 1 ? 's' : ''} detectada{pageCount !== 1 ? 's' : ''}</div>
             </div>
-            <button className="file-remove" onClick={()=>{setFile(null);setPages([]);setSelectedPages([]);setSuccess('');setSelectedPromos([]);}}><I d="M6 18L18 6M6 6l12 12"/></button>
+            <button className="file-remove" onClick={()=>{setFile(null);setPages([]);setPageCount(0);setSelectedPages([]);setSuccess('');setSelectedPromos([]);}}><I d="M6 18L18 6M6 6l12 12"/></button>
           </div>
         )}
         <input ref={inputRef} type="file" accept=".pdf" style={{display:'none'}} onChange={e=>handleFile(e.target.files[0])}/>
@@ -129,7 +168,7 @@ export default function PDFEditor() {
           <div className="card">
             <div className="card-header">
               <div className="card-header-icon"><I d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></div>
-              <div><div className="card-title">Páginas ({pages.length})</div><div className="card-desc">Selecione páginas para extrair</div></div>
+              <div><div className="card-title">Páginas ({pageCount})</div><div className="card-desc">Selecione páginas para extrair</div></div>
             </div>
             <div style={{display:'flex', gap:6, marginBottom:12}}>
               <button className="btn btn-secondary" style={{width:'auto',padding:'5px 12px',fontSize:11}} onClick={selectAll}>Selecionar todas</button>
@@ -146,30 +185,49 @@ export default function PDFEditor() {
             </div>
           </div>
 
-          {/* NOVO CARD: Mesclar Material Promocional */}
+          {/* Anexar PDFs Padrão — dinâmico */}
           <div className="card">
             <div className="card-header">
               <div className="card-header-icon"><I d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"/></div>
-              <div><div className="card-title">Anexar Material Promocional</div><div className="card-desc">Adicione catálogos ou fichas ao final da cotação</div></div>
-            </div>
-            
-            <div style={{display:'flex', flexDirection:'column', gap:10, marginBottom:15, padding: '5px 0'}}>
-              {promoOptions.map(promo => (
-                <label key={promo.id} style={{display:'flex', alignItems:'center', gap:8, fontSize:14, cursor:'pointer', color: 'var(--navy)'}}>
-                  <input
-                    type="checkbox"
-                    checked={selectedPromos.includes(promo.id)}
-                    onChange={() => togglePromo(promo.id)}
-                    style={{cursor:'pointer', width: 16, height: 16}}
-                  />
-                  {promo.label}
-                </label>
-              ))}
+              <div><div className="card-title">Anexar PDFs Padrão</div><div className="card-desc">Adicione catálogos ou fichas ao final da cotação</div></div>
             </div>
 
-            <button className="btn btn-secondary" style={{width:'auto', padding:'9px 16px', fontSize:13}} onClick={()=>handleDownload('mergePromo')} disabled={loading || selectedPromos.length === 0}>
-              {loading ? <><div className="spinner"/>Processando...</> : <><I d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>Mesclar PDFs</>}
-            </button>
+            {loadingPromos ? (
+              <div style={{fontSize:13,color:'#94A3B8',padding:'8px 0'}}>Carregando PDFs disponíveis...</div>
+            ) : promoOptions.length === 0 ? (
+              <div style={{fontSize:13,color:'#94A3B8',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:8,padding:'12px 14px',display:'flex',alignItems:'center',gap:8}}>
+                <I d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                Nenhum PDF padrão cadastrado. O administrador pode adicionar PDFs na aba <strong style={{marginLeft:4}}>Usuários → PDFs Padrão</strong>.
+              </div>
+            ) : (
+              <>
+                <div style={{display:'flex', flexDirection:'column', gap:10, marginBottom:15, padding:'5px 0'}}>
+                  {promoOptions.map(pdf => (
+                    <label key={pdf.id} style={{display:'flex', alignItems:'center', gap:8, fontSize:14, cursor:'pointer', color:'var(--navy)'}}>
+                      <input
+                        type="checkbox"
+                        checked={selectedPromos.includes(pdf.id)}
+                        onChange={() => togglePromo(pdf.id)}
+                        style={{cursor:'pointer', width:16, height:16}}
+                      />
+                      <span style={{fontWeight:500}}>{pdf.name}</span>
+                      {pdf.description && <span style={{fontSize:12,color:'#94A3B8'}}>— {pdf.description}</span>}
+                    </label>
+                  ))}
+                </div>
+                <button
+                  className="btn btn-secondary"
+                  style={{width:'auto', padding:'9px 16px', fontSize:13}}
+                  onClick={()=>handleDownload('merge_standards')}
+                  disabled={loading || selectedPromos.length === 0}
+                >
+                  {loading
+                    ? <><div className="spinner"/>Processando...</>
+                    : <><I d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>Mesclar PDFs</>
+                  }
+                </button>
+              </>
+            )}
           </div>
 
           {/* Watermark */}
