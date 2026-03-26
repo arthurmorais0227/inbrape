@@ -164,27 +164,6 @@ export default function PDFEditor() {
 
       {file && (
         <>
-          {/* Pages */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-header-icon"><I d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></div>
-              <div><div className="card-title">Páginas ({pageCount})</div><div className="card-desc">Selecione páginas para extrair</div></div>
-            </div>
-            <div style={{display:'flex', gap:6, marginBottom:12}}>
-              <button className="btn btn-secondary" style={{width:'auto',padding:'5px 12px',fontSize:11}} onClick={selectAll}>Selecionar todas</button>
-              <button className="btn btn-secondary" style={{width:'auto',padding:'5px 12px',fontSize:11}} onClick={clearSel}>Limpar seleção</button>
-              {selectedPages.length > 0 && <span style={{fontSize:12,color:'var(--navy)',alignSelf:'center',fontWeight:600}}>{selectedPages.length} selecionada(s)</span>}
-            </div>
-            <div className="pdf-pages">
-              {pages.map(p => (
-                <div key={p} className={`pdf-page-thumb ${selectedPages.includes(p)?'selected':''}`} onClick={()=>togglePage(p)}>
-                  <div className="pdf-page-icon"><I d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></div>
-                  <div className="pdf-page-num">Página {p}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
           {/* Anexar PDFs Padrão — dinâmico */}
           <div className="card">
             <div className="card-header">
@@ -261,6 +240,27 @@ export default function PDFEditor() {
             <button className="btn btn-secondary" style={{width:'auto', padding:'9px 16px', fontSize:13}} onClick={()=>handleDownload('annotate')} disabled={loading || !annotation.trim()}>
               {loading ? <><div className="spinner"/>Processando...</> : <><I d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>Baixar com anotação</>}
             </button>
+          </div>
+
+            {/* Pages */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-header-icon"><I d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></div>
+              <div><div className="card-title">Páginas ({pageCount})</div><div className="card-desc">Selecione páginas para extrair</div></div>
+            </div>
+            <div style={{display:'flex', gap:6, marginBottom:12}}>
+              <button className="btn btn-secondary" style={{width:'auto',padding:'5px 12px',fontSize:11}} onClick={selectAll}>Selecionar todas</button>
+              <button className="btn btn-secondary" style={{width:'auto',padding:'5px 12px',fontSize:11}} onClick={clearSel}>Limpar seleção</button>
+              {selectedPages.length > 0 && <span style={{fontSize:12,color:'var(--navy)',alignSelf:'center',fontWeight:600}}>{selectedPages.length} selecionada(s)</span>}
+            </div>
+            <div className="pdf-pages">
+              {pages.map(p => (
+                <div key={p} className={`pdf-page-thumb ${selectedPages.includes(p)?'selected':''}`} onClick={()=>togglePage(p)}>
+                  <div className="pdf-page-icon"><I d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></div>
+                  <div className="pdf-page-num">Página {p}</div>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Extract pages */}
