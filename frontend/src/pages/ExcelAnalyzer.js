@@ -27,13 +27,14 @@ function ChartView({ data, columns, aiConfig }) {
 
   // --- NOVA: Função auxiliar de limpeza de nome para agrupamento ---
   const getGroupingKey = (str) => {
-    if (!str) return '';
-    return String(str)
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, "") // remove acentos
-      .toLowerCase()
-      .replace(/[./""]/g, '') // remove ./ " "
-      .trim();
-  };
+  if (!str) return '';
+  return String(str)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')  // remove acentos
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')        // remove TUDO que não é letra ou número
+    .trim();
+};
 
   // --- NOVA: Lógica de Processamento de Dados (Filtro, Agrupamento e Métricas) ---
   // Esta lógica alimenta as métricas e serve de base para os gráficos
