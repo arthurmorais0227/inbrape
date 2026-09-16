@@ -17,7 +17,16 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors({
-  origin: ['https://inbrape.vercel.app', 'http://localhost:3000'],
+  origin: (origin, callback) => {
+    if (
+      !origin ||
+      origin === 'http://localhost:3000' ||
+      /^https:\/\/inbrape(-[a-z0-9-]+)?\.vercel\.app$/.test(origin)
+    ) {
+      return callback(null, true);
+    }
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
 }));
 
