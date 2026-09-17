@@ -40,6 +40,9 @@ export default function AdminPanel() {
   const [modal, setModal] = useState(null);
   const [newPass, setNewPass] = useState('');
   const [msg, setMsg] = useState({ type:'', text:'' });
+  const [allPdfs, setAllPdfs] = useState([]);
+  const [selectedPdfIds, setSelectedPdfIds] = useState([]);
+  const [savingAccess, setSavingAccess] = useState(false);
 
   const token = localStorage.getItem('ai_token');
 
@@ -53,6 +56,37 @@ export default function AdminPanel() {
   }, [token]);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
+
+  async function openPdfAccessModal(user) {
+    setModal({ type:'pdf-access', user });
+    try {
+      const [pdfsRes, accessRes] = await Promise.all([
+        fetch(`${API_URL}/pdf-standards`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${API_URL}/admin/users/${user.id}/pdf-access`, { headers: { 'Authorization': `Bearer ${token}` } }),
+      ]);
+      setAllPdfs(await pdfsRes.json());
+      setSelectedPdfIds(await accessRes.json());
+    } catch { showMsg('error', 'Erro ao carregar PDFs.'); }
+  }
+
+  function togglePdfId(id) {
+    setSelectedPdfIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+
+  async function savePdfAccess() {
+    setSavingAccess(true);
+    try {
+      const r = await fetch(`${API_URL}/admin/users/${modal.user.id}/pdf-access`, {
+        method: 'PUT', headers: { 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ pdfIds: selectedPdfIds }),
+      });
+      const data = await r.json();
+      if (!r.ok) { showMsg('error', data.error); return; }
+      showMsg('success', 'Acesso a PDFs atualizado!');
+      setModal(null);
+    } catch { showMsg('error', 'Erro ao salvar acesso.'); }
+    finally { setSavingAccess(false); }
+  }
 
   function showMsg(type, text) {
     setMsg({ type, text });
@@ -205,6 +239,9 @@ export default function AdminPanel() {
                       <button onClick={()=>{setModal({type:'password',user});setNewPass('');}} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#EAF0F8',border:'1px solid rgba(0,40,85,0.15)',borderRadius:8,fontSize:12,fontWeight:600,color:'#002855',cursor:'pointer',fontFamily:'inherit'}}>
                         <I d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>Senha
                       </button>
+                      <button onClick={()=>openPdfAccessModal(user)} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#FDF3EA',border:'1px solid rgba(232,119,34,0.25)',borderRadius:8,fontSize:12,fontWeight:600,color:'#E87722',cursor:'pointer',fontFamily:'inherit'}}>
+                        <I d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"/>PDFs
+                      </button>
                       <button onClick={()=>deleteUser(user.id)} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 10px',background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:8,fontSize:12,color:'#DC2626',cursor:'pointer',fontFamily:'inherit'}}>
                         <I d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                       </button>
@@ -230,6 +267,37 @@ export default function AdminPanel() {
           <div style={{display:'flex',gap:8}}>
             <button onClick={()=>setModal(null)} style={{flex:1,padding:'10px',background:'white',border:'1.5px solid #E2E8F0',borderRadius:9,fontSize:13,fontWeight:600,color:'#475569',cursor:'pointer',fontFamily:'inherit'}}>Cancelar</button>
             <button onClick={changePassword} style={{flex:1,padding:'10px',background:'#002855',border:'none',borderRadius:9,fontSize:13,fontWeight:600,color:'white',cursor:'pointer',fontFamily:'inherit'}}>Salvar senha</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal?.type === 'pdf-access' && (
+        <Modal title={`PDFs liberados — ${modal.user.name}`} onClose={()=>setModal(null)}>
+          <p style={{fontSize:13,color:'#64748B',marginBottom:14}}>
+            {selectedPdfIds.length === 0
+              ? <>Nenhum PDF marcado ainda: <strong>@{modal.user.username}</strong> continua vendo todos os PDFs padrão. Marque abaixo para restringir.</>
+              : <>Marque os PDFs que <strong>@{modal.user.username}</strong> pode ver. Desmarque todos para voltar ao acesso total.</>}
+          </p>
+          {allPdfs.length === 0 ? (
+            <div style={{textAlign:'center',padding:20,color:'#94A3B8',fontSize:13}}>Nenhum PDF padrão cadastrado ainda.</div>
+          ) : (
+            <div style={{display:'flex',flexDirection:'column',gap:8,maxHeight:280,overflowY:'auto',marginBottom:16}}>
+              {allPdfs.map(pdf => (
+                <label key={pdf.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:9,cursor:'pointer',fontSize:13}}>
+                  <input type="checkbox" checked={selectedPdfIds.includes(pdf.id)} onChange={()=>togglePdfId(pdf.id)} />
+                  <div>
+                    <div style={{fontWeight:600,color:'#1E293B'}}>{pdf.name}</div>
+                    {pdf.description && <div style={{fontSize:11,color:'#94A3B8'}}>{pdf.description}</div>}
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={()=>setModal(null)} style={{flex:1,padding:'10px',background:'white',border:'1.5px solid #E2E8F0',borderRadius:9,fontSize:13,fontWeight:600,color:'#475569',cursor:'pointer',fontFamily:'inherit'}}>Cancelar</button>
+            <button onClick={savePdfAccess} disabled={savingAccess} style={{flex:1,padding:'10px',background:'#E87722',border:'none',borderRadius:9,fontSize:13,fontWeight:600,color:'white',cursor:'pointer',fontFamily:'inherit'}}>
+              {savingAccess ? 'Salvando...' : 'Salvar acesso'}
+            </button>
           </div>
         </Modal>
       )}
