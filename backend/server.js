@@ -17,16 +17,7 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors({
-  origin: (origin, callback) => {
-    if (
-      !origin ||
-      origin === 'http://localhost:3000' ||
-      /^https:\/\/inbrape(-[a-z0-9-]+)?\.vercel\.app$/.test(origin)
-    ) {
-      return callback(null, true);
-    }
-    callback(new Error('Not allowed by CORS'));
-  },
+  origin: ['https://inbrape.vercel.app', 'http://localhost:3000'],
   credentials: true,
 }));
 
@@ -211,6 +202,48 @@ app.delete('/admin/users/:id', auth, admin, async (req, res) => {
   const { id } = req.params;
   await pool.query('DELETE FROM users WHERE id=$1', [id]);
   res.json({ ok: true });
+});
+
+// Lista os ids de PDFs padrão que um usuário pode ver. Lista vazia = sem
+// restrição (acesso a todos).
+app.get('/admin/users/:id/pdf-access', auth, admin, async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT pdf_standard_id FROM user_pdf_access WHERE user_id=$1',
+      [req.params.id]
+    );
+    res.json(r.rows.map(row => row.pdf_standard_id));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Define a lista completa de PDFs permitidos para um usuário (substitui a
+// anterior). Enviar pdfIds: [] remove toda restrição (volta a ver todos).
+app.put('/admin/users/:id/pdf-access', auth, admin, async (req, res) => {
+  const { id } = req.params;
+  const { pdfIds } = req.body;
+  if (!Array.isArray(pdfIds)) return res.status(400).json({ error: 'pdfIds deve ser uma lista.' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM user_pdf_access WHERE user_id=$1', [id]);
+    if (pdfIds.length) {
+      const values = pdfIds.map((_, i) => `($1, $${i + 2})`).join(',');
+      await client.query(
+        `INSERT INTO user_pdf_access (user_id, pdf_standard_id) VALUES ${values}`,
+        [id, ...pdfIds]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 // ─────────────────────────────────────────────
@@ -574,14 +607,45 @@ async function initPDFStandardsTable() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+
+  // Restrição opcional de acesso: se um usuário tiver linhas aqui, só enxerga
+  // esses PDFs padrão. Sem nenhuma linha = acesso a todos (comportamento padrão).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_pdf_access (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      pdf_standard_id INTEGER NOT NULL REFERENCES pdf_standards(id) ON DELETE CASCADE,
+      PRIMARY KEY (user_id, pdf_standard_id)
+    );
+  `);
+}
+
+// Retorna null se o usuário tem acesso a TODOS os PDFs padrão (irrestrito),
+// ou um Set com os ids permitidos, se ele estiver restrito.
+async function getAllowedStandardIds(user) {
+  if (user.role === 'admin') return null;
+  const r = await pool.query(
+    'SELECT pdf_standard_id FROM user_pdf_access WHERE user_id=$1',
+    [user.id]
+  );
+  if (!r.rows.length) return null;
+  return new Set(r.rows.map(row => row.pdf_standard_id));
 }
 
 // Listar PDFs padrão
 app.get('/pdf-standards', auth, async (req, res) => {
   try {
-    const r = await pool.query(
-      'SELECT id, name, description, filename, size, created_at FROM pdf_standards ORDER BY created_at DESC'
-    );
+    const allowed = await getAllowedStandardIds(req.user);
+    let r;
+    if (allowed === null) {
+      r = await pool.query(
+        'SELECT id, name, description, filename, size, created_at FROM pdf_standards ORDER BY created_at DESC'
+      );
+    } else {
+      r = await pool.query(
+        'SELECT id, name, description, filename, size, created_at FROM pdf_standards WHERE id = ANY($1) ORDER BY created_at DESC',
+        [[...allowed]]
+      );
+    }
     res.json(r.rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -617,11 +681,6 @@ app.delete('/pdf-standards/:id', auth, admin, async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
-
-// Listar PDFs padrão
-app.get('/pdf-standards', auth, (req, res) => {
-  res.json(loadStandardsMeta());
 });
 
 app.post('/pdf-edit', auth, upload.single('file'), async (req, res) => {
@@ -677,8 +736,15 @@ app.post('/pdf-edit', auth, upload.single('file'), async (req, res) => {
     // ── MERGE COM PDFs PADRÃO ──────────────────────────────────────────────
     if (action === 'merge_standards') {
   const { standardIds } = req.body;
-  const ids = standardIds ? JSON.parse(standardIds) : [];
+  let ids = standardIds ? JSON.parse(standardIds) : [];
   if (!ids.length) throw new Error('Nenhum PDF selecionado.');
+
+  // Garante que o usuário só consiga mesclar PDFs padrão que ele tem permissão de ver
+  const allowed = await getAllowedStandardIds(req.user);
+  if (allowed !== null) {
+    ids = ids.filter(id => allowed.has(Number(id)));
+    if (!ids.length) throw new Error('Você não tem acesso a nenhum dos PDFs padrão selecionados.');
+  }
 
   const mergedDoc = await PDFDocument.create();
 
@@ -709,36 +775,6 @@ app.post('/pdf-edit', auth, upload.single('file'), async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: 'Erro ao processar PDF.' });
   }
-});
-
-// Adicionar PDF padrão (admin)
-app.post('/pdf-standards', auth, admin, upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo.' });
-  const { name, description } = req.body;
-  if (!name?.trim()) return res.status(400).json({ error: 'Nome obrigatório.' });
-  const meta = loadStandardsMeta();
-  const newPdf = {
-    id: Date.now().toString(),
-    name: name.trim(),
-    description: description?.trim() || '',
-    filename: req.file.filename,
-    size: req.file.size,
-    created_at: new Date().toISOString(),
-  };
-  meta.push(newPdf);
-  saveStandardsMeta(meta);
-  res.status(201).json(newPdf);
-});
-
-// Remover PDF padrão (admin)
-app.delete('/pdf-standards/:id', auth, admin, (req, res) => {
-  const meta = loadStandardsMeta();
-  const pdf = meta.find(p => p.id === req.params.id);
-  if (!pdf) return res.status(404).json({ error: 'PDF não encontrado.' });
-  const filePath = path.join(PDFS_DIR, pdf.filename);
-  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-  saveStandardsMeta(meta.filter(p => p.id !== req.params.id));
-  res.json({ message: 'PDF removido.' });
 });
 
 // ─────────────────────────────────────────────
