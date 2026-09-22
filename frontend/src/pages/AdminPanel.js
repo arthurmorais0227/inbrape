@@ -42,6 +42,7 @@ export default function AdminPanel() {
   const [msg, setMsg] = useState({ type:'', text:'' });
   const [allPdfs, setAllPdfs] = useState([]);
   const [selectedPdfIds, setSelectedPdfIds] = useState([]);
+  const [pdfAccessSearch, setPdfAccessSearch] = useState('');
   const [savingAccess, setSavingAccess] = useState(false);
 
   const token = localStorage.getItem('ai_token');
@@ -59,6 +60,7 @@ export default function AdminPanel() {
 
   async function openPdfAccessModal(user) {
     setModal({ type:'pdf-access', user });
+    setPdfAccessSearch('');
     try {
       const [pdfsRes, accessRes] = await Promise.all([
         fetch(`${API_URL}/pdf-standards`, { headers: { 'Authorization': `Bearer ${token}` } }),
@@ -281,17 +283,41 @@ export default function AdminPanel() {
           {allPdfs.length === 0 ? (
             <div style={{textAlign:'center',padding:20,color:'#94A3B8',fontSize:13}}>Nenhum PDF padrão cadastrado ainda.</div>
           ) : (
-            <div style={{display:'flex',flexDirection:'column',gap:8,maxHeight:280,overflowY:'auto',marginBottom:16}}>
-              {allPdfs.map(pdf => (
-                <label key={pdf.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:9,cursor:'pointer',fontSize:13}}>
-                  <input type="checkbox" checked={selectedPdfIds.includes(pdf.id)} onChange={()=>togglePdfId(pdf.id)} />
-                  <div>
-                    <div style={{fontWeight:600,color:'#1E293B'}}>{pdf.name}</div>
-                    {pdf.description && <div style={{fontSize:11,color:'#94A3B8'}}>{pdf.description}</div>}
+            <>
+              <div style={{position:'relative', marginBottom:10}}>
+                <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', color:'#94A3B8'}}>
+                  <I d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/>
+                </div>
+                <input
+                  style={{width:'100%', boxSizing:'border-box', padding:'8px 10px 8px 32px', border:'1px solid #E2E8F0', borderRadius:9, fontSize:13, fontFamily:'inherit'}}
+                  placeholder="Buscar PDF pelo nome ou descrição..."
+                  value={pdfAccessSearch}
+                  onChange={e=>setPdfAccessSearch(e.target.value)}
+                />
+              </div>
+              {(() => {
+                const q = pdfAccessSearch.trim().toLowerCase();
+                const filtered = q
+                  ? allPdfs.filter(pdf => pdf.name.toLowerCase().includes(q) || (pdf.description || '').toLowerCase().includes(q))
+                  : allPdfs;
+                if (filtered.length === 0) {
+                  return <div style={{textAlign:'center',padding:16,color:'#94A3B8',fontSize:13}}>Nenhum PDF encontrado para "{pdfAccessSearch}".</div>;
+                }
+                return (
+                  <div style={{display:'flex',flexDirection:'column',gap:8,maxHeight:280,overflowY:'auto',marginBottom:16}}>
+                    {filtered.map(pdf => (
+                      <label key={pdf.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:9,cursor:'pointer',fontSize:13}}>
+                        <input type="checkbox" checked={selectedPdfIds.includes(pdf.id)} onChange={()=>togglePdfId(pdf.id)} />
+                        <div>
+                          <div style={{fontWeight:600,color:'#1E293B'}}>{pdf.name}</div>
+                          {pdf.description && <div style={{fontSize:11,color:'#94A3B8'}}>{pdf.description}</div>}
+                        </div>
+                      </label>
+                    ))}
                   </div>
-                </label>
-              ))}
-            </div>
+                );
+              })()}
+            </>
           )}
           <div style={{display:'flex',gap:8}}>
             <button onClick={()=>setModal(null)} style={{flex:1,padding:'10px',background:'white',border:'1.5px solid #E2E8F0',borderRadius:9,fontSize:13,fontWeight:600,color:'#475569',cursor:'pointer',fontFamily:'inherit'}}>Cancelar</button>
