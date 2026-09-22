@@ -18,6 +18,7 @@ export default function PDFEditor() {
   const [selectedPromos, setSelectedPromos] = useState([]);
   const [promoOptions, setPromoOptions] = useState([]);   // ← vem do backend
   const [loadingPromos, setLoadingPromos] = useState(true);
+  const [promoSearch, setPromoSearch] = useState('');
 
   const inputRef = useRef();
 
@@ -180,20 +181,44 @@ export default function PDFEditor() {
               </div>
             ) : (
               <>
-                <div style={{display:'flex', flexDirection:'column', gap:10, marginBottom:15, padding:'5px 0'}}>
-                  {promoOptions.map(pdf => (
-                    <label key={pdf.id} style={{display:'flex', alignItems:'center', gap:8, fontSize:14, cursor:'pointer', color:'var(--navy)'}}>
-                      <input
-                        type="checkbox"
-                        checked={selectedPromos.includes(pdf.id)}
-                        onChange={() => togglePromo(pdf.id)}
-                        style={{cursor:'pointer', width:16, height:16}}
-                      />
-                      <span style={{fontWeight:500}}>{pdf.name}</span>
-                      {pdf.description && <span style={{fontSize:12,color:'#94A3B8'}}>— {pdf.description}</span>}
-                    </label>
-                  ))}
+                <div style={{position:'relative', marginBottom:12}}>
+                  <div style={{position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', color:'#94A3B8'}}>
+                    <I d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/>
+                  </div>
+                  <input
+                    className="question-input"
+                    style={{paddingLeft:36}}
+                    placeholder="Buscar PDF pelo nome ou descrição..."
+                    value={promoSearch}
+                    onChange={e=>setPromoSearch(e.target.value)}
+                  />
                 </div>
+                {(() => {
+                  const filtered = promoOptions.filter(pdf => {
+                    const q = promoSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    return pdf.name.toLowerCase().includes(q) || (pdf.description || '').toLowerCase().includes(q);
+                  });
+                  if (filtered.length === 0) {
+                    return <div style={{fontSize:13,color:'#94A3B8',padding:'10px 0'}}>Nenhum PDF encontrado para "{promoSearch}".</div>;
+                  }
+                  return (
+                    <div style={{display:'flex', flexDirection:'column', gap:10, marginBottom:15, padding:'5px 0'}}>
+                      {filtered.map(pdf => (
+                        <label key={pdf.id} style={{display:'flex', alignItems:'center', gap:8, fontSize:14, cursor:'pointer', color:'var(--navy)'}}>
+                          <input
+                            type="checkbox"
+                            checked={selectedPromos.includes(pdf.id)}
+                            onChange={() => togglePromo(pdf.id)}
+                            style={{cursor:'pointer', width:16, height:16}}
+                          />
+                          <span style={{fontWeight:500}}>{pdf.name}</span>
+                          {pdf.description && <span style={{fontSize:12,color:'#94A3B8'}}>— {pdf.description}</span>}
+                        </label>
+                      ))}
+                    </div>
+                  );
+                })()}
                 <button
                   className="btn btn-success"
                   style={{width:'auto', padding:'9px 16px', fontSize:13}}
