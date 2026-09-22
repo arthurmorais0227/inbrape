@@ -15,6 +15,7 @@ export default function StandardPDFs() {
   const [description, setDescription] = useState('');
   const [file, setFile]       = useState(null);
   const [msg, setMsg]         = useState({ type:'', text:'' });
+  const [search, setSearch]   = useState('');
   const inputRef = useRef();
 
   useEffect(() => { fetchPDFs(); }, []);
@@ -133,26 +134,55 @@ export default function StandardPDFs() {
           <p style={{marginTop:10,fontWeight:500}}>Nenhum PDF padrão cadastrado</p>
         </div>
       ) : (
-        <div style={{display:'flex',flexDirection:'column',gap:8}}>
-          {pdfs.map(pdf => (
-            <div key={pdf.id} style={{background:'white',border:'1px solid var(--gray-200)',borderRadius:'var(--radius-lg)',padding:'14px 18px',display:'flex',alignItems:'center',gap:14,boxShadow:'var(--shadow-sm)'}}>
-              <div style={{width:40,height:40,background:'var(--navy-pale)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--navy)',flexShrink:0}}>
-                <I d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={20}/>
-              </div>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:14,fontWeight:600,color:'var(--navy)'}}>{pdf.name}</div>
-                {pdf.description && <div style={{fontSize:12,color:'var(--gray-400)',marginTop:1}}>{pdf.description}</div>}
-                <div style={{fontSize:11,color:'var(--gray-300)',marginTop:2}}>
-                  Adicionado em {new Date(pdf.created_at).toLocaleDateString('pt-BR')}
-                </div>
-              </div>
-              <button onClick={()=>handleDelete(pdf.id)} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:8,fontSize:12,color:'#DC2626',cursor:'pointer',fontFamily:'inherit'}}>
-                <I d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                Remover
-              </button>
+        <>
+          <div style={{position:'relative', marginBottom:14}}>
+            <div style={{position:'absolute', left:14, top:'50%', transform:'translateY(-50%)', color:'var(--gray-400)'}}>
+              <I d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" size={16}/>
             </div>
-          ))}
-        </div>
+            <input
+              className="question-input"
+              style={{paddingLeft:38}}
+              placeholder="Buscar PDF pelo nome ou descrição..."
+              value={search}
+              onChange={e=>setSearch(e.target.value)}
+            />
+          </div>
+          {(() => {
+            const q = search.trim().toLowerCase();
+            const filtered = q
+              ? pdfs.filter(pdf => pdf.name.toLowerCase().includes(q) || (pdf.description || '').toLowerCase().includes(q))
+              : pdfs;
+            if (filtered.length === 0) {
+              return (
+                <div style={{textAlign:'center',padding:30,color:'var(--gray-400)',fontSize:13}}>
+                  Nenhum PDF encontrado para "{search}".
+                </div>
+              );
+            }
+            return (
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {filtered.map(pdf => (
+                  <div key={pdf.id} style={{background:'white',border:'1px solid var(--gray-200)',borderRadius:'var(--radius-lg)',padding:'14px 18px',display:'flex',alignItems:'center',gap:14,boxShadow:'var(--shadow-sm)'}}>
+                    <div style={{width:40,height:40,background:'var(--navy-pale)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--navy)',flexShrink:0}}>
+                      <I d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={20}/>
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:14,fontWeight:600,color:'var(--navy)'}}>{pdf.name}</div>
+                      {pdf.description && <div style={{fontSize:12,color:'var(--gray-400)',marginTop:1}}>{pdf.description}</div>}
+                      <div style={{fontSize:11,color:'var(--gray-300)',marginTop:2}}>
+                        Adicionado em {new Date(pdf.created_at).toLocaleDateString('pt-BR')}
+                      </div>
+                    </div>
+                    <button onClick={()=>handleDelete(pdf.id)} style={{display:'flex',alignItems:'center',gap:5,padding:'6px 12px',background:'#FEF2F2',border:'1px solid #FCA5A5',borderRadius:8,fontSize:12,color:'#DC2626',cursor:'pointer',fontFamily:'inherit'}}>
+                      <I d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                      Remover
+                    </button>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </>
       )}
     </div>
   );
