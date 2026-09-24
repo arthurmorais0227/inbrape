@@ -1,4 +1,4 @@
-const API_URL = process.env.REACT_APP_API_URL || 'https://inbrape-production.up.railway.app';
+const API_URL = process.env.REACT_APP_API_URL || 'https://inbrape.onrender.com';
 
 function authHeaders() {
   return { 'Authorization': `Bearer ${localStorage.getItem('ai_token')}` };
@@ -40,4 +40,16 @@ export async function analyzeDocument(file, question) {
   const r = await fetch(`${API_URL}/analyze-document`, { method: 'POST', headers: authHeaders(), body: fd });
   if (!r.ok) { const e = await r.json(); throw new Error(e.error || 'Erro ao analisar documento.'); }
   return (await r.json()).result;
+}
+
+export async function getCrmOrganizacoes(page = 1, limit = 20) {
+  const r = await fetch(`${API_URL}/crm/organizacoes?page=${page}&limit=${limit}`, { headers: authHeaders() });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Erro ao buscar organizações.'); }
+  return await r.json();
+}
+
+export async function getCrmCotacoes(page = 1, limit = 20) {
+  const r = await fetch(`${API_URL}/crm/cotacoes?page=${page}&limit=${limit}`, { headers: authHeaders() });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Erro ao buscar cotações.'); }
+  return await r.json();
 }

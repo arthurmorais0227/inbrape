@@ -7,10 +7,11 @@ import DocumentAnalyzer from "./pages/DocumentAnalyzer";
 import PDFEditor from "./pages/PDFEditor";
 import History from "./pages/History";
 import AdminPanel from "./pages/AdminPanel";
+import Crm from "./pages/Crm";
 import "./App.css";
 
 const API_URL =
-  process.env.REACT_APP_API_URL || "https://inbrape-production.up.railway.app";
+  process.env.REACT_APP_API_URL || "https://inbrape.onrender.com";
 
 // ── NOTIFICATION SYSTEM ───────────────────────
 function NotificationCenter({ notifications, onDismiss }) {
@@ -161,6 +162,7 @@ const NOTIFY_CONFIGS = {
     bgColor: "#ECFDF5",
     title: "Gráfico · Gerado pela IA",
   },
+  crm: { icon: "🏢", color: "#0EA5E9", bgColor: "#EFF8FF", title: "CRM · Atualizado" },
 };
 
 export default function App() {
@@ -195,7 +197,7 @@ export default function App() {
           if (r.ok) setUser(JSON.parse(saved));
           else handleLogout();
         })
-        .catch(() => {});
+        .catch(() => { });
     }
   }, []);
 
@@ -215,7 +217,7 @@ export default function App() {
           }
           return pending;
         });
-      } catch {}
+      } catch { }
     };
     check();
     const interval = setInterval(check, 30000);
@@ -266,6 +268,12 @@ export default function App() {
             onNotify={(msg) => notify(msg, "document")}
           />
         ),
+      },
+      {
+        id: "crm",
+        label: "CRM",
+        d: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5",
+        component: (props) => <Crm {...props} onNotify={(msg) => notify(msg, "crm")} />,
       },
       {
         id: "pdf",
@@ -461,6 +469,7 @@ export default function App() {
         {activeTab === "pdf" && <PDFEditor />}
         {activeTab === "history" && <History />}
         {activeTab === "admin" && <AdminPanel />}
+        {activeTab === "crm" && <Crm onNotify={(msg) => notify(msg, "crm")} />}
       </main>
     </div>
   );
