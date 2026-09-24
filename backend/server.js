@@ -292,10 +292,12 @@ app.post('/analyze', auth, async (req, res) => {
   if (mode !== 'summary' || !rows) {
     // uso normal de texto
     const prompt = text;
-    let result;
-    try { result = await callNvidia(prompt); }
-    catch { result = await callGroq(prompt); }
-    return res.json({ result });
+    try {
+      const result = await callAI(prompt);
+      return res.json({ result });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
   }
 
   // modo gráfico: IA processa e agrupa os dados
@@ -326,9 +328,7 @@ Sua tarefa:
 IMPORTANTE: os arrays labels e values devem ter o mesmo tamanho. Agrupe sempre — nunca retorne dados duplicados.`;
 
   try {
-    let raw;
-    try { raw = await callNvidia(prompt); }
-    catch { raw = await callGroq(prompt); }
+    const raw = await callAI(prompt);
 
     const match = (raw || '').match(/\{[\s\S]*\}/);
     if (!match) throw new Error('IA não retornou JSON válido.');
@@ -370,27 +370,68 @@ async function callNvidia(prompt) {
 // GROQ (fallback)
 // ─────────────────────────────────────────────
 async function callGroq(prompt) {
-  if (!process.env.GROQ_API_KEY) return null;
+  if (!process.env.GROQ_API_KEY) throw new Error('GROQ_API_KEY não configurada.');
 
+  const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'openai/gpt-oss-120b',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+    })
+  });
+
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error?.message || 'Erro ao consultar Groq.');
+  return data.choices?.[0]?.message?.content;
+}
+
+// ─────────────────────────────────────────────
+// Tenta NVIDIA primeiro; se falhar, tenta Groq. Só falha de verdade se os dois falharem.
+// ─────────────────────────────────────────────
+async function callAI(prompt) {
   try {
-    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-      })
-    });
-
-    const data = await r.json();
-    return data.choices?.[0]?.message?.content;
-  } catch {
-    return null;
+    return await callNvidia(prompt);
+  } catch (nvErr) {
+    try {
+      return await callGroq(prompt);
+    } catch (groqErr) {
+      throw new Error(`IA indisponível. NVIDIA: ${nvErr.message} | Groq: ${groqErr.message}`);
+    }
   }
+}
+
+// ─────────────────────────────────────────────
+// NVIDIA (visão — usado na análise de imagem)
+// ─────────────────────────────────────────────
+async function callNvidiaVision(prompt, imageUrl) {
+  const r = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.NVIDIA_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'meta/llama-3.2-90b-vision-instruct',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: imageUrl } },
+        ],
+      }],
+      max_tokens: 2000,
+      temperature: 0.2,
+    })
+  });
+
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error?.message || 'Erro ao analisar imagem (NVIDIA).');
+  return data.choices?.[0]?.message?.content;
 }
 
 // ─────────────────────────────────────────────
@@ -452,11 +493,7 @@ ${req.body.question || 'Gere insights estratégicos'}
 Responda considerando TODOS os dados.
 `;
 
-    let result;
-    try { result = await callNvidia(prompt); }
-    catch { result = await callGroq(prompt); }
-
-    // ✅ agora retorna meta junto
+    const result = await callAI(prompt);
     res.json({
       result,
       summary,
@@ -513,10 +550,7 @@ Pergunta/Instrução: ${question}
 
 Responda em português de forma clara e estruturada.`;
 
-    let result;
-    try { result = await callNvidia(prompt); }
-    catch { result = await callGroq(prompt); }
-
+    const result = await callAI(prompt);
     res.json({ result });
 
   } catch (e) {
@@ -546,39 +580,11 @@ app.post('/analyze-image', auth, upload.single('file'), async (req, res) => {
 
     const prompt = prompts[mode] || prompts.describe;
 
-    if (!process.env.GROQ_API_KEY) {
-      return res.status(500).json({ error: 'GROQ_API_KEY não configurada.' });
+    if (!process.env.NVIDIA_API_KEY) {
+      return res.status(500).json({ error: 'NVIDIA_API_KEY não configurada.' });
     }
 
-    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              { type: 'image_url', image_url: { url: imageUrl } },
-            ],
-          },
-        ],
-        max_tokens: 2000,
-        temperature: 0.2,
-      }),
-    });
-
-    const data = await r.json();
-
-    if (!r.ok) {
-      throw new Error(data.error?.message || 'Erro ao analisar imagem.');
-    }
-
-    const result = data.choices?.[0]?.message?.content;
+    const result = await callNvidiaVision(prompt, imageUrl);
     res.json({ result });
 
   } catch (e) {
@@ -592,14 +598,12 @@ app.post('/analyze-image', auth, upload.single('file'), async (req, res) => {
 app.post('/chat', auth, async (req, res) => {
   const prompt = req.body.messages.map(m => m.content).join('\n');
 
-  let result;
   try {
-    result = await callNvidia(prompt);
-  } catch {
-    result = await callGroq(prompt);
+    const result = await callAI(prompt);
+    res.json({ result });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
-
-  res.json({ result });
 });
 
 /// ── PDF STANDARDS ─────────────────────────────────────────────────────────────
