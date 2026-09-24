@@ -21,6 +21,7 @@ app.use(cors({
     if (
       !origin ||
       origin === 'http://localhost:3000' ||
+      origin === 'https://inbrape.onrender.com' ||
       /^https:\/\/inbrape(-[a-z0-9-]+)?\.vercel\.app$/.test(origin)
     ) {
       return callback(null, true);
@@ -787,6 +788,40 @@ app.post('/pdf-edit', auth, upload.single('file'), async (req, res) => {
 
   } catch (e) {
     res.status(500).json({ error: 'Erro ao processar PDF.' });
+  }
+});
+
+// ─────────────────────────────────────────────
+// CRM (Gluo)
+// ─────────────────────────────────────────────
+async function gluoFetch(path, query = '') {
+  const res = await fetch(`${process.env.GLUO_API_URL}${path}${query}`, {
+    headers: {
+      Authorization: `Bearer ${process.env.GLUO_API_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) throw new Error(`Gluo CRM respondeu ${res.status}`);
+  return res.json();
+}
+
+app.get('/crm/organizacoes', auth, async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const data = await gluoFetch('/accounts', `?page=${page}&limit=${limit}`);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/crm/cotacoes', auth, async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const data = await gluoFetch('/quotes', `?page=${page}&limit=${limit}`);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
