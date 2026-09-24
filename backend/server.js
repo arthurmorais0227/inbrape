@@ -794,22 +794,37 @@ app.post('/pdf-edit', auth, upload.single('file'), async (req, res) => {
 // ─────────────────────────────────────────────
 // CRM (Gluo)
 // ─────────────────────────────────────────────
-async function gluoFetch(path, query = '') {
-  const res = await fetch(`${process.env.GLUO_API_URL}${path}${query}`, {
-    headers: {
-      Authorization: `Bearer ${process.env.GLUO_API_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-  });
-  if (!res.ok) throw new Error(`Gluo CRM respondeu ${res.status}`);
-  return res.json();
+async function gluoFetchAll(path, sort) {
+  const BATCH = 100;
+  const MAX_PAGES = 50;
+  let all = [];
+  let page = 1;
+
+  while (page <= MAX_PAGES) {
+    const params = new URLSearchParams({ page, limit: BATCH });
+    if (sort) params.set('sort', sort);
+
+    const res = await fetch(`${process.env.GLUO_API_URL}${path}?${params}`, {
+      headers: {
+        Authorization: `Bearer ${process.env.GLUO_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!res.ok) throw new Error(`Gluo CRM respondeu ${res.status}`);
+    const json = await res.json();
+    const batch = json?.data || json?.result || json?.records || json?.items || (Array.isArray(json) ? json : []);
+
+    all = all.concat(batch);
+    if (batch.length < BATCH) break;
+    page++;
+  }
+  return all;
 }
 
 app.get('/crm/organizacoes', auth, async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
-    const data = await gluoFetch('/accounts', `?page=${page}&limit=${limit}`);
-    res.json(data);
+    const data = await gluoFetchAll('/accounts', '-createdtime');
+    res.json({ data });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -817,9 +832,8 @@ app.get('/crm/organizacoes', auth, async (req, res) => {
 
 app.get('/crm/cotacoes', auth, async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
-    const data = await gluoFetch('/quotes', `?page=${page}&limit=${limit}`);
-    res.json(data);
+    const data = await gluoFetchAll('/quotes', '-createdtime');
+    res.json({ data });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
