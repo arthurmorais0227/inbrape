@@ -794,16 +794,14 @@ app.post('/pdf-edit', auth, upload.single('file'), async (req, res) => {
 // ─────────────────────────────────────────────
 // CRM (Gluo)
 // ─────────────────────────────────────────────
-async function gluoFetchAll(path, sort) {
+async function gluoFetchAll(path, extraParams = {}) {
   const BATCH = 100;
-  const MAX_PAGES = 50;
+  const MAX_PAGES = 500; // teto de segurança bem acima do necessário (até 50.000 registros)
   let all = [];
   let page = 1;
 
   while (page <= MAX_PAGES) {
-    const params = new URLSearchParams({ page, limit: BATCH });
-    if (sort) params.set('sort', sort);
-
+    const params = new URLSearchParams({ page, limit: BATCH, ...extraParams });
     const res = await fetch(`${process.env.GLUO_API_URL}${path}?${params}`, {
       headers: {
         Authorization: `Bearer ${process.env.GLUO_API_TOKEN}`,
@@ -815,7 +813,7 @@ async function gluoFetchAll(path, sort) {
     const batch = json?.data || json?.result || json?.records || json?.items || (Array.isArray(json) ? json : []);
 
     all = all.concat(batch);
-    if (batch.length < BATCH) break;
+    if (batch.length < BATCH) break; // chegou na última página de verdade
     page++;
   }
   return all;
@@ -823,7 +821,18 @@ async function gluoFetchAll(path, sort) {
 
 app.get('/crm/organizacoes', auth, async (req, res) => {
   try {
-    const data = await gluoFetchAll('/accounts', '-createdtime');
+    const data = await gluoFetchAll('/accounts', { sort: '-createdtime' });
+    res.json({ data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Versão leve: só id + nome, usada pra resolver "Cliente" nas cotações sem
+// trazer os ~150 campos completos de cada organização.
+app.get('/crm/organizacoes-nomes', auth, async (req, res) => {
+  try {
+    const data = await gluoFetchAll('/accounts', { fields: 'accountname' });
     res.json({ data });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -832,7 +841,7 @@ app.get('/crm/organizacoes', auth, async (req, res) => {
 
 app.get('/crm/cotacoes', auth, async (req, res) => {
   try {
-    const data = await gluoFetchAll('/quotes', '-createdtime');
+    const data = await gluoFetchAll('/quotes', { sort: '-createdtime' });
     res.json({ data });
   } catch (err) {
     res.status(500).json({ error: err.message });
