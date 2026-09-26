@@ -53,3 +53,9 @@ export async function getCrmCotacoes(page = 1, limit = 20) {
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Erro ao buscar cotações.'); }
   return await r.json();
 }
+
+export async function getCrmOrganizacoesNomes() {
+  const r = await fetch(`${API_URL}/crm/organizacoes-nomes`, { headers: authHeaders() });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Erro ao buscar nomes de organizações.'); }
+  return await r.json();
+}
