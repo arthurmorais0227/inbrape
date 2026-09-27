@@ -42,14 +42,20 @@ export async function analyzeDocument(file, question) {
   return (await r.json()).result;
 }
 
-export async function getCrmOrganizacoes(page = 1, limit = 20) {
-  const r = await fetch(`${API_URL}/crm/organizacoes?page=${page}&limit=${limit}`, { headers: authHeaders() });
+export async function getCrmOrganizacoes(page = 1, limit = 20, q = '', filter = '') {
+  const params = new URLSearchParams({ page, limit });
+  if (q) params.set('q', q);
+  if (filter) params.set('filter', filter);
+  const r = await fetch(`${API_URL}/crm/organizacoes?${params}`, { headers: authHeaders() });
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Erro ao buscar organizações.'); }
   return await r.json();
 }
 
-export async function getCrmCotacoes(page = 1, limit = 20) {
-  const r = await fetch(`${API_URL}/crm/cotacoes?page=${page}&limit=${limit}`, { headers: authHeaders() });
+export async function getCrmCotacoes(page = 1, limit = 20, q = '', filter = '') {
+  const params = new URLSearchParams({ page, limit });
+  if (q) params.set('q', q);
+  if (filter) params.set('filter', filter);
+  const r = await fetch(`${API_URL}/crm/cotacoes?${params}`, { headers: authHeaders() });
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Erro ao buscar cotações.'); }
   return await r.json();
 }
@@ -57,5 +63,30 @@ export async function getCrmCotacoes(page = 1, limit = 20) {
 export async function getCrmOrganizacoesNomes() {
   const r = await fetch(`${API_URL}/crm/organizacoes-nomes`, { headers: authHeaders() });
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Erro ao buscar nomes de organizações.'); }
+  return await r.json();
+}
+
+export async function getCrmOrganizacoesFiltros() {
+  const r = await fetch(`${API_URL}/crm/organizacoes-filtros`, { headers: authHeaders() });
+  if (!r.ok) throw new Error('Erro ao buscar filtros.');
+  return await r.json();
+}
+
+export async function getCrmCotacoesFiltros() {
+  const r = await fetch(`${API_URL}/crm/cotacoes-filtros`, { headers: authHeaders() });
+  if (!r.ok) throw new Error('Erro ao buscar filtros.');
+  return await r.json();
+}
+
+export async function triggerCrmSync() {
+  const r = await fetch(`${API_URL}/crm/sync`, { method: 'POST', headers: authHeaders() });
+  const json = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(json.error || 'Erro ao iniciar sincronização.');
+  return json;
+}
+
+export async function getCrmSyncStatus() {
+  const r = await fetch(`${API_URL}/crm/sync/status`, { headers: authHeaders() });
+  if (!r.ok) throw new Error('Erro ao consultar status da sincronização.');
   return await r.json();
 }

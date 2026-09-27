@@ -792,114 +792,242 @@ app.post('/pdf-edit', auth, upload.single('file'), async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// CRM (Gluo)
+// CRM (Gluo) — sincroniza pro Postgres, tela lê do Postgres
 // ─────────────────────────────────────────────
-async function gluoFetchAll(path, extraParams = {}) {
-  const BATCH = 100;
-  const MAX_PAGES = 500; // teto de segurança bem acima do necessário (até 50.000 registros)
-  let all = [];
-  let page = 1;
 
-  while (page <= MAX_PAGES) {
-    const params = new URLSearchParams({ page, limit: BATCH, ...extraParams });
-    const res = await fetch(`${process.env.GLUO_API_URL}${path}?${params}`, {
-      headers: {
-        Authorization: `Bearer ${process.env.GLUO_API_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    if (!res.ok) throw new Error(`Gluo CRM respondeu ${res.status}`);
-    const json = await res.json();
-    const batch = json?.data || json?.result || json?.records || json?.items || (Array.isArray(json) ? json : []);
+// Estado da sincronização em andamento (em memória — reinicia se o server reiniciar)
+const syncState = {
+  running: false,
+  module: null,      // 'organizacoes' | 'cotacoes' | null
+  page: 0,
+  totalPages: null,
+  startedAt: null,
+  finishedAt: null,
+  error: null,
+};
 
-    all = all.concat(batch);
-    if (batch.length < BATCH) break; // chegou na última página de verdade
-    page++;
-  }
-  return all;
+function buildSearchText(record) {
+  return Object.values(record)
+    .filter((v) => typeof v === 'string')
+    .join(' ')
+    .toLowerCase();
 }
 
-app.get('/crm/organizacoes', auth, async (req, res) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
-    const params = new URLSearchParams({ page, limit, sort: '-createdtime' });
-    const response = await fetch(`${process.env.GLUO_API_URL}/accounts?${params}`, {
-      headers: {
-        Authorization: `Bearer ${process.env.GLUO_API_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    if (!response.ok) throw new Error(`Gluo CRM respondeu ${response.status}`);
-    res.json(await response.json());
-  } catch (err) {
-    console.error('[crm/organizacoes]', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+async function gluoFetchPage(path, page, extraParams = {}) {
+  const params = new URLSearchParams({ page, limit: 100, ...extraParams });
+  const res = await fetch(`${process.env.GLUO_API_URL}${path}?${params}`, {
+    headers: {
+      Authorization: `Bearer ${process.env.GLUO_API_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) throw new Error(`Gluo CRM respondeu ${res.status}`);
+  const json = await res.json();
+  const batch = json?.data || json?.result || json?.records || json?.items || (Array.isArray(json) ? json : []);
+  return { batch, meta: json?.meta || {} };
+}
 
-// Versão leve: só id + nome, usada pra resolver "Cliente" nas cotações sem
-// trazer os ~150 campos completos de cada organização.
-let organizacaoNomesCache = null;
-let organizacaoNomesCacheAt = 0;
-let organizacaoNomesRequest = null;
+// Upsert em lote (1 query por página, não 1 por registro — senão 104 mil
+// registros viram 104 mil round-trips no banco e trava tudo).
+async function upsertOrganizacoes(rows) {
+  const valid = rows.filter((r) => r.id);
+  if (valid.length === 0) return;
+  const cols = ['id', 'accountname', 'cpfcnpj', 'industry', 'search_text', 'data'];
+  const values = [];
+  const placeholders = valid
+    .map((r, i) => {
+      const b = i * cols.length;
+      values.push(r.id, r.accountname || null, r.cpfcnpj || null, r.industry || null, buildSearchText(r), JSON.stringify(r));
+      return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`;
+    })
+    .join(',');
+  await pool.query(
+    `INSERT INTO crm_organizacoes (id, accountname, cpfcnpj, industry, search_text, data)
+     VALUES ${placeholders}
+     ON CONFLICT (id) DO UPDATE SET
+       accountname=EXCLUDED.accountname, cpfcnpj=EXCLUDED.cpfcnpj, industry=EXCLUDED.industry,
+       search_text=EXCLUDED.search_text, data=EXCLUDED.data, synced_at=now()`,
+    values
+  );
+}
+
+async function upsertCotacoes(rows) {
+  const valid = rows.filter((r) => r.id);
+  if (valid.length === 0) return;
+  const cols = ['id', 'subject', 'quote_no', 'account_id', 'quotestage', 'total', 'validtill', 'search_text', 'data'];
+  const values = [];
+  const placeholders = valid
+    .map((r, i) => {
+      const b = i * cols.length;
+      const total = r.total != null && !Number.isNaN(Number(r.total)) ? Number(r.total) : null;
+      values.push(
+        r.id, r.subject || null, r.quote_no || null, r.account_id || null,
+        r.quotestage || null, total, r.validtill || null, buildSearchText(r), JSON.stringify(r)
+      );
+      return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9})`;
+    })
+    .join(',');
+  await pool.query(
+    `INSERT INTO crm_cotacoes (id, subject, quote_no, account_id, quotestage, total, validtill, search_text, data)
+     VALUES ${placeholders}
+     ON CONFLICT (id) DO UPDATE SET
+       subject=EXCLUDED.subject, quote_no=EXCLUDED.quote_no, account_id=EXCLUDED.account_id,
+       quotestage=EXCLUDED.quotestage, total=EXCLUDED.total, validtill=EXCLUDED.validtill,
+       search_text=EXCLUDED.search_text, data=EXCLUDED.data, synced_at=now()`,
+    values
+  );
+}
+
+async function syncModule(path, upsertFn, moduleLabel) {
+  let page = 1;
+  const BATCH = 100;
+  while (true) {
+    syncState.module = moduleLabel;
+    syncState.page = page;
+    const { batch, meta } = await gluoFetchPage(path, page, { sort: '-createdtime' });
+    if (meta?.totalPages) syncState.totalPages = meta.totalPages;
+    if (batch.length === 0) break;
+    await upsertFn(batch);
+    if (batch.length < BATCH) break;
+    page++;
+    await new Promise((r) => setTimeout(r, 550)); // respeita o rate limit da Gluo (120/min)
+  }
+}
+
+async function runFullSync() {
+  if (syncState.running) return;
+  syncState.running = true;
+  syncState.error = null;
+  syncState.startedAt = new Date().toISOString();
+  syncState.finishedAt = null;
+  try {
+    await syncModule('/accounts', upsertOrganizacoes, 'organizacoes');
+    await syncModule('/quotes', upsertCotacoes, 'cotacoes');
+  } catch (err) {
+    syncState.error = err.message;
+    console.error('[crm/sync]', err.message);
+  } finally {
+    syncState.running = false;
+    syncState.finishedAt = new Date().toISOString();
+    syncState.module = null;
+  }
+}
+
+async function initCrmTables() {
+  await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crm_organizacoes (
+      id TEXT PRIMARY KEY,
+      accountname TEXT,
+      cpfcnpj TEXT,
+      industry TEXT,
+      search_text TEXT,
+      data JSONB NOT NULL,
+      synced_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_org_search ON crm_organizacoes USING gin (search_text gin_trgm_ops)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_org_industry ON crm_organizacoes (industry)');
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crm_cotacoes (
+      id TEXT PRIMARY KEY,
+      subject TEXT,
+      quote_no TEXT,
+      account_id TEXT,
+      quotestage TEXT,
+      total NUMERIC,
+      validtill TEXT,
+      search_text TEXT,
+      data JSONB NOT NULL,
+      synced_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_search ON crm_cotacoes USING gin (search_text gin_trgm_ops)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_stage ON crm_cotacoes (quotestage)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_account ON crm_cotacoes (account_id)');
+}
+
+// ── Rotas de leitura (rápidas — vêm do Postgres, não da Gluo ao vivo) ──
+function buildListQuery(table, searchCol, filterCol) {
+  return async (req, res) => {
+    try {
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+      const offset = (page - 1) * limit;
+      const q = (req.query.q || '').trim().toLowerCase();
+      const filter = (req.query.filter || '').trim();
+
+      const conditions = [];
+      const params = [];
+      if (q) { params.push(`%${q}%`); conditions.push(`search_text ILIKE $${params.length}`); }
+      if (filter) { params.push(filter); conditions.push(`${filterCol} = $${params.length}`); }
+      const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      const totalRes = await pool.query(`SELECT COUNT(*) FROM ${table} ${where}`, params);
+      const total = parseInt(totalRes.rows[0].count, 10);
+
+      const listParams = [...params, limit, offset];
+      const dataRes = await pool.query(
+        `SELECT data FROM ${table} ${where} ORDER BY synced_at DESC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
+        listParams
+      );
+
+      res.json({ data: dataRes.rows.map((r) => r.data), meta: { page, limit, total, hasMore: offset + limit < total } });
+    } catch (err) {
+      console.error(`[${table}]`, err.message);
+      res.status(500).json({ error: err.message });
+    }
+  };
+}
+
+app.get('/crm/organizacoes', auth, buildListQuery('crm_organizacoes', 'search_text', 'industry'));
+app.get('/crm/cotacoes', auth, buildListQuery('crm_cotacoes', 'search_text', 'quotestage'));
 
 app.get('/crm/organizacoes-nomes', auth, async (req, res) => {
   try {
-    if (!organizacaoNomesCache || Date.now() - organizacaoNomesCacheAt > 5 * 60 * 1000) {
-      if (!organizacaoNomesRequest) {
-        organizacaoNomesRequest = gluoFetchAll('/accounts', { fields: 'accountname' })
-          .then(data => {
-            organizacaoNomesCache = data;
-            organizacaoNomesCacheAt = Date.now();
-            return data;
-          })
-          .finally(() => {
-            organizacaoNomesRequest = null;
-          });
-      }
-      await organizacaoNomesRequest;
-    }
-    const data = organizacaoNomesCache;
-    res.json({ data });
+    const r = await pool.query('SELECT id, accountname FROM crm_organizacoes');
+    res.json({ data: r.rows });
   } catch (err) {
     console.error('[crm/organizacoes-nomes]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/crm/cotacoes', auth, async (req, res) => {
+app.get('/crm/organizacoes-filtros', auth, async (req, res) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
-    const params = new URLSearchParams({ page, limit, sort: '-createdtime' });
-    const response = await fetch(`${process.env.GLUO_API_URL}/quotes?${params}`, {
-      headers: {
-        Authorization: `Bearer ${process.env.GLUO_API_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    if (!response.ok) throw new Error(`Gluo CRM respondeu ${response.status}`);
-    res.json(await response.json());
+    const r = await pool.query(`SELECT DISTINCT industry FROM crm_organizacoes WHERE industry IS NOT NULL AND industry <> '' ORDER BY industry LIMIT 300`);
+    res.json({ data: r.rows.map((row) => row.industry) });
   } catch (err) {
-    console.error('[crm/cotacoes]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/debug-env', (req, res) => {
-  res.json({
-    temGluoUrl: !!process.env.GLUO_API_URL,
-    temGluoToken: !!process.env.GLUO_API_TOKEN,
-    gluoUrlValor: process.env.GLUO_API_URL || null,
-  });
+app.get('/crm/cotacoes-filtros', auth, async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT DISTINCT quotestage FROM crm_cotacoes WHERE quotestage IS NOT NULL AND quotestage <> '' ORDER BY quotestage LIMIT 300`);
+    res.json({ data: r.rows.map((row) => row.quotestage) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
+// ── Sincronização ──
+app.post('/crm/sync', auth, admin, (req, res) => {
+  if (syncState.running) return res.status(409).json({ error: 'Sincronização já em andamento' });
+  runFullSync(); // dispara e não espera — pode levar ~10 minutos com o volume atual
+  res.json({ started: true });
+});
+
+app.get('/crm/sync/status', auth, (req, res) => {
+  res.json(syncState);
+});
 // ─────────────────────────────────────────────
 // START
 // ─────────────────────────────────────────────
 initDB().then(async () => {
   await initPDFStandardsTable();
+  await initCrmTables();
   app.listen(PORT, () => {
     console.log(`🚀 Server rodando na porta ${PORT}`);
   });
