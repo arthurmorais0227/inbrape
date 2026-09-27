@@ -821,8 +821,17 @@ async function gluoFetchAll(path, extraParams = {}) {
 
 app.get('/crm/organizacoes', auth, async (req, res) => {
   try {
-    const data = await gluoFetchAll('/accounts', { sort: '-createdtime' });
-    res.json({ data });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const params = new URLSearchParams({ page, limit, sort: '-createdtime' });
+    const response = await fetch(`${process.env.GLUO_API_URL}/accounts?${params}`, {
+      headers: {
+        Authorization: `Bearer ${process.env.GLUO_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!response.ok) throw new Error(`Gluo CRM respondeu ${response.status}`);
+    res.json(await response.json());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
