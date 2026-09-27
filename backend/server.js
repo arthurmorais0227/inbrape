@@ -833,6 +833,7 @@ app.get('/crm/organizacoes', auth, async (req, res) => {
     if (!response.ok) throw new Error(`Gluo CRM respondeu ${response.status}`);
     res.json(await response.json());
   } catch (err) {
+    console.error('[crm/organizacoes]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -862,6 +863,7 @@ app.get('/crm/organizacoes-nomes', auth, async (req, res) => {
     const data = organizacaoNomesCache;
     res.json({ data });
   } catch (err) {
+    console.error('[crm/organizacoes-nomes]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -880,6 +882,7 @@ app.get('/crm/cotacoes', auth, async (req, res) => {
     if (!response.ok) throw new Error(`Gluo CRM respondeu ${response.status}`);
     res.json(await response.json());
   } catch (err) {
+    console.error('[crm/cotacoes]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
