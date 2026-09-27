@@ -839,9 +839,27 @@ app.get('/crm/organizacoes', auth, async (req, res) => {
 
 // Versão leve: só id + nome, usada pra resolver "Cliente" nas cotações sem
 // trazer os ~150 campos completos de cada organização.
+let organizacaoNomesCache = null;
+let organizacaoNomesCacheAt = 0;
+let organizacaoNomesRequest = null;
+
 app.get('/crm/organizacoes-nomes', auth, async (req, res) => {
   try {
-    const data = await gluoFetchAll('/accounts', { fields: 'accountname' });
+    if (!organizacaoNomesCache || Date.now() - organizacaoNomesCacheAt > 5 * 60 * 1000) {
+      if (!organizacaoNomesRequest) {
+        organizacaoNomesRequest = gluoFetchAll('/accounts', { fields: 'accountname' })
+          .then(data => {
+            organizacaoNomesCache = data;
+            organizacaoNomesCacheAt = Date.now();
+            return data;
+          })
+          .finally(() => {
+            organizacaoNomesRequest = null;
+          });
+      }
+      await organizacaoNomesRequest;
+    }
+    const data = organizacaoNomesCache;
     res.json({ data });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -850,8 +868,17 @@ app.get('/crm/organizacoes-nomes', auth, async (req, res) => {
 
 app.get('/crm/cotacoes', auth, async (req, res) => {
   try {
-    const data = await gluoFetchAll('/quotes', { sort: '-createdtime' });
-    res.json({ data });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const params = new URLSearchParams({ page, limit, sort: '-createdtime' });
+    const response = await fetch(`${process.env.GLUO_API_URL}/quotes?${params}`, {
+      headers: {
+        Authorization: `Bearer ${process.env.GLUO_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!response.ok) throw new Error(`Gluo CRM respondeu ${response.status}`);
+    res.json(await response.json());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
