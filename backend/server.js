@@ -887,6 +887,14 @@ app.get('/crm/cotacoes', auth, async (req, res) => {
   }
 });
 
+app.get('/debug-env', (req, res) => {
+  res.json({
+    temGluoUrl: !!process.env.GLUO_API_URL,
+    temGluoToken: !!process.env.GLUO_API_TOKEN,
+    gluoUrlValor: process.env.GLUO_API_URL || null,
+  });
+});
+
 // ─────────────────────────────────────────────
 // START
 // ─────────────────────────────────────────────
