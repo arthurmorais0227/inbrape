@@ -296,7 +296,7 @@ export default function Crm({ onNotify }) {
       }, 2500);
       return () => clearInterval(pollRef.current);
     }
-  }, [syncStatus?.running]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [syncStatus?.running]);
 
   function switchModule(mod) {
     if (mod === moduleKey) return;
