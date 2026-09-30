@@ -131,6 +131,59 @@
 
 .crm-count { font-size: 12px; color: var(--gray-400); margin-left: auto; white-space: nowrap; }
 
+/* Painel de filtros por coluna (Cotações) */
+.crm-cot-filters {
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.crm-cot-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px 12px;
+  margin-bottom: 12px;
+}
+.crm-cot-field { display: flex; flex-direction: column; gap: 4px; }
+.crm-cot-field span { font-size: 11px; font-weight: 600; color: var(--gray-400); }
+.crm-cot-field input {
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--gray-800);
+  outline: none;
+}
+.crm-cot-field input:focus { border-color: var(--navy-light); }
+
+.crm-cot-filters-actions { display: flex; align-items: center; gap: 12px; }
+.crm-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--navy);
+  color: var(--white);
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.crm-btn-primary:hover { background: var(--navy-mid); }
+.crm-btn-text {
+  background: transparent;
+  border: none;
+  color: var(--gray-500);
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px;
+}
+.crm-btn-text:hover { color: var(--navy); }
+
 /* Tabela */
 .crm-table-wrap {
   background: var(--white);
@@ -333,4 +386,5 @@
   .crm-count { margin-left: 0; width: 100%; order: 3; }
   .crm-panel { width: 100%; }
   .crm-panel-highlights { grid-template-columns: 1fr; }
+  .crm-cot-filters-grid { grid-template-columns: 1fr 1fr; }
 }

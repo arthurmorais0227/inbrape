@@ -795,10 +795,9 @@ app.post('/pdf-edit', auth, upload.single('file'), async (req, res) => {
 // CRM (Gluo) — sincroniza pro Postgres, tela lê do Postgres
 // ─────────────────────────────────────────────
 
-// Estado da sincronização em andamento (em memória — reinicia se o server reiniciar)
 const syncState = {
   running: false,
-  module: null,      // 'organizacoes' | 'cotacoes' | null
+  module: null,
   page: 0,
   totalPages: null,
   startedAt: null,
@@ -827,8 +826,6 @@ async function gluoFetchPage(path, page, extraParams = {}) {
   return { batch, meta: json?.meta || {} };
 }
 
-// Upsert em lote (1 query por página, não 1 por registro — senão 104 mil
-// registros viram 104 mil round-trips no banco e trava tudo).
 async function upsertOrganizacoes(rows) {
   const valid = rows.filter((r) => r.id);
   if (valid.length === 0) return;
@@ -851,10 +848,17 @@ async function upsertOrganizacoes(rows) {
   );
 }
 
+// Agora grava também nome_representante_inbrape, complemento_inbrape,
+// produto_inbrape e cod_representante_inbrape — usados nos campos de busca
+// por coluna da tela de Cotações.
 async function upsertCotacoes(rows) {
   const valid = rows.filter((r) => r.id);
   if (valid.length === 0) return;
-  const cols = ['id', 'subject', 'quote_no', 'account_id', 'quotestage', 'total', 'validtill', 'search_text', 'data'];
+  const cols = [
+    'id', 'subject', 'quote_no', 'account_id', 'quotestage', 'total', 'validtill',
+    'nome_representante_inbrape', 'complemento_inbrape', 'produto_inbrape', 'cod_representante_inbrape',
+    'search_text', 'data',
+  ];
   const values = [];
   const placeholders = valid
     .map((r, i) => {
@@ -862,17 +866,24 @@ async function upsertCotacoes(rows) {
       const total = r.total != null && !Number.isNaN(Number(r.total)) ? Number(r.total) : null;
       values.push(
         r.id, r.subject || null, r.quote_no || null, r.account_id || null,
-        r.quotestage || null, total, r.validtill || null, buildSearchText(r), JSON.stringify(r)
+        r.quotestage || null, total, r.validtill || null,
+        r.nome_representante_inbrape || null, r.complemento_inbrape || null,
+        r.produto_inbrape || null, r.cod_representante_inbrape || null,
+        buildSearchText(r), JSON.stringify(r)
       );
-      return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9})`;
+      return `(${cols.map((_, j) => `$${b + j + 1}`).join(',')})`;
     })
     .join(',');
   await pool.query(
-    `INSERT INTO crm_cotacoes (id, subject, quote_no, account_id, quotestage, total, validtill, search_text, data)
+    `INSERT INTO crm_cotacoes (${cols.join(', ')})
      VALUES ${placeholders}
      ON CONFLICT (id) DO UPDATE SET
        subject=EXCLUDED.subject, quote_no=EXCLUDED.quote_no, account_id=EXCLUDED.account_id,
        quotestage=EXCLUDED.quotestage, total=EXCLUDED.total, validtill=EXCLUDED.validtill,
+       nome_representante_inbrape=EXCLUDED.nome_representante_inbrape,
+       complemento_inbrape=EXCLUDED.complemento_inbrape,
+       produto_inbrape=EXCLUDED.produto_inbrape,
+       cod_representante_inbrape=EXCLUDED.cod_representante_inbrape,
        search_text=EXCLUDED.search_text, data=EXCLUDED.data, synced_at=now()`,
     values
   );
@@ -890,7 +901,7 @@ async function syncModule(path, upsertFn, moduleLabel) {
     await upsertFn(batch);
     if (batch.length < BATCH) break;
     page++;
-    await new Promise((r) => setTimeout(r, 550)); // respeita o rate limit da Gluo (120/min)
+    await new Promise((r) => setTimeout(r, 550));
   }
 }
 
@@ -915,6 +926,7 @@ async function runFullSync() {
 
 async function initCrmTables() {
   await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS crm_organizacoes (
       id TEXT PRIMARY KEY,
@@ -943,46 +955,101 @@ async function initCrmTables() {
       synced_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
+  // Colunas novas pra busca por coluna (adicionadas depois — em bases já existentes
+  // isso só complementa, não apaga nada que já estava sincronizado)
+  await pool.query('ALTER TABLE crm_cotacoes ADD COLUMN IF NOT EXISTS nome_representante_inbrape TEXT');
+  await pool.query('ALTER TABLE crm_cotacoes ADD COLUMN IF NOT EXISTS complemento_inbrape TEXT');
+  await pool.query('ALTER TABLE crm_cotacoes ADD COLUMN IF NOT EXISTS produto_inbrape TEXT');
+  await pool.query('ALTER TABLE crm_cotacoes ADD COLUMN IF NOT EXISTS cod_representante_inbrape TEXT');
+
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_search ON crm_cotacoes USING gin (search_text gin_trgm_ops)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_stage ON crm_cotacoes (quotestage)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_account ON crm_cotacoes (account_id)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_subject ON crm_cotacoes USING gin (subject gin_trgm_ops)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_repr ON crm_cotacoes USING gin (nome_representante_inbrape gin_trgm_ops)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_produto ON crm_cotacoes USING gin (produto_inbrape gin_trgm_ops)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_complemento ON crm_cotacoes USING gin (complemento_inbrape gin_trgm_ops)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_codrepr ON crm_cotacoes (cod_representante_inbrape)');
 }
 
-// ── Rotas de leitura (rápidas — vêm do Postgres, não da Gluo ao vivo) ──
-function buildListQuery(table, searchCol, filterCol) {
-  return async (req, res) => {
-    try {
-      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
-      const offset = (page - 1) * limit;
-      const q = (req.query.q || '').trim().toLowerCase();
-      const filter = (req.query.filter || '').trim();
+// ── Organizações: continua com busca única + filtro por segmento ──
+app.get('/crm/organizacoes', auth, async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+    const q = (req.query.q || '').trim().toLowerCase();
+    const filter = (req.query.filter || '').trim();
 
-      const conditions = [];
-      const params = [];
-      if (q) { params.push(`%${q}%`); conditions.push(`search_text ILIKE $${params.length}`); }
-      if (filter) { params.push(filter); conditions.push(`${filterCol} = $${params.length}`); }
-      const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const conditions = [];
+    const params = [];
+    if (q) { params.push(`%${q}%`); conditions.push(`search_text ILIKE $${params.length}`); }
+    if (filter) { params.push(filter); conditions.push(`industry = $${params.length}`); }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-      const totalRes = await pool.query(`SELECT COUNT(*) FROM ${table} ${where}`, params);
-      const total = parseInt(totalRes.rows[0].count, 10);
+    const totalRes = await pool.query(`SELECT COUNT(*) FROM crm_organizacoes ${where}`, params);
+    const total = parseInt(totalRes.rows[0].count, 10);
 
-      const listParams = [...params, limit, offset];
-      const dataRes = await pool.query(
-        `SELECT data FROM ${table} ${where} ORDER BY synced_at DESC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
-        listParams
-      );
+    const listParams = [...params, limit, offset];
+    const dataRes = await pool.query(
+      `SELECT data FROM crm_organizacoes ${where} ORDER BY synced_at DESC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
+      listParams
+    );
 
-      res.json({ data: dataRes.rows.map((r) => r.data), meta: { page, limit, total, hasMore: offset + limit < total } });
-    } catch (err) {
-      console.error(`[${table}]`, err.message);
-      res.status(500).json({ error: err.message });
-    }
-  };
-}
+    res.json({ data: dataRes.rows.map((r) => r.data), meta: { page, limit, total, hasMore: offset + limit < total } });
+  } catch (err) {
+    console.error('[crm/organizacoes]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
-app.get('/crm/organizacoes', auth, buildListQuery('crm_organizacoes', 'search_text', 'industry'));
-app.get('/crm/cotacoes', auth, buildListQuery('crm_cotacoes', 'search_text', 'quotestage'));
+// ── Cotações: busca por coluna, igual ao CRM oficial ──
+app.get('/crm/cotacoes', auth, async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+
+    const textFilters = {
+      subject: req.query.subject,
+      nome_representante_inbrape: req.query.nome_representante_inbrape,
+      quotestage: req.query.quotestage,
+      complemento_inbrape: req.query.complemento_inbrape,
+      produto_inbrape: req.query.produto_inbrape,
+      cod_representante_inbrape: req.query.cod_representante_inbrape,
+    };
+    const accountName = (req.query.account_name || '').trim();
+    const totalFilter = (req.query.total || '').trim();
+
+    const conditions = [];
+    const params = [];
+    Object.entries(textFilters).forEach(([col, val]) => {
+      const v = (val || '').trim();
+      if (v) { params.push(`%${v}%`); conditions.push(`c.${col} ILIKE $${params.length}`); }
+    });
+    if (totalFilter) { params.push(`%${totalFilter}%`); conditions.push(`c.total::text ILIKE $${params.length}`); }
+
+    const needsJoin = !!accountName;
+    if (accountName) { params.push(`%${accountName}%`); conditions.push(`o.accountname ILIKE $${params.length}`); }
+
+    const from = needsJoin ? 'crm_cotacoes c LEFT JOIN crm_organizacoes o ON o.id = c.account_id' : 'crm_cotacoes c';
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const totalRes = await pool.query(`SELECT COUNT(*) FROM ${from} ${where}`, params);
+    const total = parseInt(totalRes.rows[0].count, 10);
+
+    const listParams = [...params, limit, offset];
+    const dataRes = await pool.query(
+      `SELECT c.data FROM ${from} ${where} ORDER BY c.synced_at DESC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
+      listParams
+    );
+
+    res.json({ data: dataRes.rows.map((r) => r.data), meta: { page, limit, total, hasMore: offset + limit < total } });
+  } catch (err) {
+    console.error('[crm/cotacoes]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/crm/organizacoes-nomes', auth, async (req, res) => {
   try {
@@ -1003,19 +1070,10 @@ app.get('/crm/organizacoes-filtros', auth, async (req, res) => {
   }
 });
 
-app.get('/crm/cotacoes-filtros', auth, async (req, res) => {
-  try {
-    const r = await pool.query(`SELECT DISTINCT quotestage FROM crm_cotacoes WHERE quotestage IS NOT NULL AND quotestage <> '' ORDER BY quotestage LIMIT 300`);
-    res.json({ data: r.rows.map((row) => row.quotestage) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ── Sincronização ──
 app.post('/crm/sync', auth, admin, (req, res) => {
   if (syncState.running) return res.status(409).json({ error: 'Sincronização já em andamento' });
-  runFullSync(); // dispara e não espera — pode levar ~10 minutos com o volume atual
+  runFullSync();
   res.json({ started: true });
 });
 

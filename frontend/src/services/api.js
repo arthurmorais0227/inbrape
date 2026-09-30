@@ -51,10 +51,11 @@ export async function getCrmOrganizacoes(page = 1, limit = 20, q = '', filter = 
   return await r.json();
 }
 
-export async function getCrmCotacoes(page = 1, limit = 20, q = '', filter = '') {
+// Agora recebe um objeto de filtros por coluna, ex:
+// { subject: 'manga', quotestage: 'aberto', account_name: 'windwerk', total: '500' }
+export async function getCrmCotacoes(page = 1, limit = 20, filters = {}) {
   const params = new URLSearchParams({ page, limit });
-  if (q) params.set('q', q);
-  if (filter) params.set('filter', filter);
+  Object.entries(filters).forEach(([k, v]) => { if (v) params.set(k, v); });
   const r = await fetch(`${API_URL}/crm/cotacoes?${params}`, { headers: authHeaders() });
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Erro ao buscar cotações.'); }
   return await r.json();
@@ -68,12 +69,6 @@ export async function getCrmOrganizacoesNomes() {
 
 export async function getCrmOrganizacoesFiltros() {
   const r = await fetch(`${API_URL}/crm/organizacoes-filtros`, { headers: authHeaders() });
-  if (!r.ok) throw new Error('Erro ao buscar filtros.');
-  return await r.json();
-}
-
-export async function getCrmCotacoesFiltros() {
-  const r = await fetch(`${API_URL}/crm/cotacoes-filtros`, { headers: authHeaders() });
   if (!r.ok) throw new Error('Erro ao buscar filtros.');
   return await r.json();
 }
