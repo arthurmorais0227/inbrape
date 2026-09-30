@@ -1,0 +1,144 @@
+.hm {
+  --navy: #002855;
+  --orange: #E87722;
+  --ink: #0f1f33;
+  --muted: #5b6b80;
+  --line: #e2e8f0;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 28px 20px 64px;
+  color: var(--ink);
+}
+
+/* ---------- Hero ---------- */
+.hm-hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 360px;
+  padding: 44px 48px;
+  border-radius: 24px;
+  overflow: hidden;
+  color: #fff;
+  background:
+    radial-gradient(520px 320px at 92% 8%, rgba(232, 119, 34, 0.45), transparent 65%),
+    radial-gradient(420px 300px at 0% 100%, rgba(14, 165, 233, 0.25), transparent 70%),
+    linear-gradient(135deg, #001b3d 0%, var(--navy) 60%, #0a3a73 100%);
+  background-size: 140% 140%, 140% 140%, 100% 100%;
+  animation: hm-drift 14s ease-in-out infinite alternate, hm-rise 0.7s both;
+}
+.hm-hello { margin: 0 0 10px; font-weight: 600; color: #ffb27a; }
+.hm-hero h1 { margin: 0; font-size: clamp(1.9rem, 4vw, 3rem); line-height: 1.08; letter-spacing: -0.02em; font-weight: 800; max-width: 16ch; }
+.hm-sub { margin: 16px 0 26px; max-width: 46ch; color: #c7d6ec; line-height: 1.55; }
+
+.hm-search {
+  display: flex; align-items: center; gap: 10px; max-width: 380px;
+  padding: 11px 16px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(6px);
+  transition: background 0.2s, border-color 0.2s;
+}
+.hm-search:focus-within { background: rgba(255, 255, 255, 0.2); border-color: var(--orange); }
+.hm-search svg { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.8; }
+.hm-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #fff; font: inherit; }
+.hm-search input::placeholder { color: #b5c6de; }
+
+
+.hm-hero-text { position: relative; z-index: 1; max-width: 52%; }
+
+/* Ilustração à direita, dissolvendo no fundo do hero */
+.hm-art {
+  position: absolute; top: 0; right: 0; height: 100%; width: 62%;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.6) 20%, #000 45%);
+  mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.6) 20%, #000 45%);
+}
+.hm-fl { animation: hm-fl 5.5s ease-in-out infinite; }
+.hm-flow { animation: hm-flow 3s linear infinite; }
+.hm-pulse { transform-box: fill-box; transform-origin: center; animation: hm-pulse 3.4s ease-in-out infinite; }
+.hm-spin { animation: hm-spin 16s linear infinite; }
+
+/* ---------- Seções ---------- */
+.hm section { margin-top: 40px; }
+.hm-h2 { margin: 0 0 16px; font-size: 1.15rem; font-weight: 700; }
+.hm-grid { display: grid; gap: 16px; }
+.hm-grid-3 { grid-template-columns: repeat(3, 1fr); }
+.hm-grid-auto { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+
+/* ---------- Cards ---------- */
+.hm-card {
+  --mx: 50%; --my: 50%;
+  position: relative;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  padding: 22px; text-align: left; text-decoration: none; cursor: pointer;
+  color: inherit; font: inherit;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+  animation: hm-rise 0.6s both;
+  animation-delay: calc(var(--i) * 70ms + 150ms);
+  transition: transform 0.25s, box-shadow 0.25s, border-color 0.25s;
+}
+.hm-card::before {
+  content: ''; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--c);
+  transform: scaleX(0); transform-origin: left; transition: transform 0.35s;
+}
+.hm-card::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.25s;
+  background: radial-gradient(260px circle at var(--mx) var(--my), color-mix(in srgb, var(--c) 16%, transparent), transparent 70%);
+}
+.hm-card:hover, .hm-card:focus-visible {
+  transform: translateY(-5px);
+  border-color: color-mix(in srgb, var(--c) 45%, white);
+  box-shadow: 0 18px 40px -14px color-mix(in srgb, var(--c) 45%, transparent);
+}
+.hm-card:hover::before, .hm-card:focus-visible::before { transform: scaleX(1); }
+.hm-card:hover::after { opacity: 1; }
+.hm-card:focus-visible { outline: 3px solid var(--orange); outline-offset: 3px; }
+.hm-card > * { position: relative; z-index: 1; }
+
+.hm-ico {
+  display: grid; place-items: center; width: 46px; height: 46px; margin-bottom: 8px;
+  border-radius: 14px; color: var(--c);
+  background: color-mix(in srgb, var(--c) 13%, white);
+  transition: transform 0.3s, background 0.3s, color 0.3s;
+}
+.hm-ico svg { width: 22px; height: 22px; }
+.hm-card:hover .hm-ico { transform: rotate(-8deg) scale(1.1); background: var(--c); color: #fff; }
+
+.hm-card strong { font-size: 1.05rem; font-weight: 700; }
+.hm-desc { color: var(--muted); font-size: 0.92rem; line-height: 1.45; }
+.hm-pill {
+  position: absolute !important; top: 18px; right: 18px; padding: 3px 10px; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 700; color: #fff; background: var(--c);
+}
+.hm-go { display: inline-flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 14px; font-size: 0.88rem; font-weight: 600; color: var(--navy); }
+.hm-go-ico svg { width: 16px; height: 16px; display: block; transition: transform 0.25s; }
+.hm-card:hover .hm-go-ico svg { transform: translateX(4px); }
+
+.hm-card-big { padding: 26px; min-height: 210px; }
+.hm-card-big strong { font-size: 1.25rem; }
+
+.hm-empty { margin-top: 40px; color: var(--muted); text-align: center; }
+
+/* ---------- Animações ---------- */
+@keyframes hm-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+@keyframes hm-fl { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+@keyframes hm-flow { to { stroke-dashoffset: -48; } }
+@keyframes hm-pulse { 0%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.1); opacity: 1; } }
+@keyframes hm-spin { to { transform: rotate(360deg); } }
+@keyframes hm-drift { from { background-position: 0% 0%, 100% 100%, 0 0; } to { background-position: 100% 30%, 0% 60%, 0 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .hm *, .hm *::before, .hm *::after { animation: none !important; transition: none !important; }
+}
+
+/* ---------- Responsivo ---------- */
+@media (max-width: 860px) {
+  .hm-hero { padding: 32px 24px; min-height: 0; }
+  .hm-hero-text { max-width: none; }
+  .hm-art { width: 100%; opacity: 0.35; -webkit-mask-image: none; mask-image: none; }
+  .hm-grid-3 { grid-template-columns: 1fr; }
+  .hm-card-big { min-height: 0; }
+}

@@ -8,7 +8,9 @@ import PDFEditor from "./pages/PDFEditor";
 import History from "./pages/History";
 import AdminPanel from "./pages/AdminPanel";
 import Crm from "./pages/Crm";
+import Home from "./pages/Home";
 import "./App.css";
+
 
 const API_URL =
   process.env.REACT_APP_API_URL || "https://inbrape.onrender.com";
@@ -167,7 +169,7 @@ const NOTIFY_CONFIGS = {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState("pdf");
+  const [activeTab, setActiveTab] = useState("home");
   const [pendingCount, setPendingCount] = useState(0);
   const [notifications, setNotifications] = useState([]);
 
@@ -234,6 +236,12 @@ export default function App() {
 
   const TABS = [
     ...[
+      {
+        id: "home",
+        label: "Início",
+        d: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6",
+        component: Home,
+      },
       {
         id: "text",
         label: "Texto",
@@ -466,6 +474,7 @@ export default function App() {
         {activeTab === "document" && (
           <DocumentAnalyzer onNotify={(msg) => notify(msg, "document")} />
         )}
+        {activeTab === "home" && <Home onNavigate={setActiveTab} />}
         {activeTab === "pdf" && <PDFEditor />}
         {activeTab === "history" && <History />}
         {activeTab === "admin" && <AdminPanel />}

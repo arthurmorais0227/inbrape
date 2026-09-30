@@ -140,8 +140,14 @@ function DetailPanel({ item, moduleKey, onClose, orgMap }) {
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape') onClose(); }
     document.addEventListener('keydown', onKey);
+    // Trava a rolagem da página enquanto o modal está aberto
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     panelRef.current?.focus();
-    return () => document.removeEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
   }, [onClose]);
 
   const entries = Object.entries(item)
@@ -150,7 +156,7 @@ function DetailPanel({ item, moduleKey, onClose, orgMap }) {
 
   return (
     <div className="crm-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="crm-panel" ref={panelRef} tabIndex={-1}>
+      <div className="crm-panel" role="dialog" aria-modal="true" aria-label={title} ref={panelRef} tabIndex={-1}>
         <div className="crm-panel-header">
           <div className="crm-avatar">{initials(title)}</div>
           <div className="crm-panel-heading">
