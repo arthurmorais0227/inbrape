@@ -1080,12 +1080,309 @@ app.post('/crm/sync', auth, admin, (req, res) => {
 app.get('/crm/sync/status', auth, (req, res) => {
   res.json(syncState);
 });
+
+// ─────────────────────────────────────────────
+// RELATÓRIO DE VISITA POR ÁUDIO
+// ─────────────────────────────────────────────
+async function initVisitasTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crm_visitas (
+      id SERIAL PRIMARY KEY,
+      account_id TEXT,
+      empresa_unidade TEXT,
+      data_visita DATE,
+      com_quem TEXT,
+      objetivo TEXT,
+      resultado TEXT,
+      oportunidades TEXT,
+      concorrente TEXT,
+      estagio TEXT,
+      proximo_passo TEXT,
+      responsavel TEXT,
+      data_proximo_passo DATE,
+      apoio_comercial TEXT,
+      transcricao TEXT,
+      criado_por INTEGER REFERENCES users(id),
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_visitas_account ON crm_visitas (account_id)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_visitas_data ON crm_visitas (data_visita)');
+}
+
+async function transcribeAudio(buffer, filename) {
+  if (!process.env.GROQ_API_KEY) throw new Error('GROQ_API_KEY não configurada.');
+  const form = new FormData();
+  form.append('file', new Blob([buffer]), filename || 'audio.m4a');
+  form.append('model', 'whisper-large-v3');
+  form.append('language', 'pt');
+  form.append('response_format', 'json');
+
+  const r = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+    body: form,
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error?.message || 'Erro ao transcrever áudio.');
+  return data.text;
+}
+
+function buildVisitExtractionPrompt(transcricao) {
+  return `Você é um assistente que estrutura relatórios de visita comercial/técnica de campo (indústria de filtração — mangas e gaiolas).
+
+Abaixo está a transcrição de um áudio gravado por um técnico/vendedor logo após uma visita a um cliente. Extraia as informações no formato de relatório padrão da empresa.
+
+Transcrição:
+"""
+${transcricao}
+"""
+
+Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), no formato exato:
+{
+  "empresa_unidade": "nome da empresa/unidade visitada, ou vazio se não mencionado",
+  "com_quem": "nome(s), cargo(s) e área(s) das pessoas com quem falou",
+  "objetivo": "objetivo da visita",
+  "resultado": "o que foi constatado e decidido",
+  "oportunidades": "outras oportunidades identificadas na planta (filtros, mangas, gaiolas, lonas, peças)",
+  "concorrente": "concorrente atual e preço, se mencionado",
+  "estagio": "uma destas opções: contato, apresentacao, homologacao-vendor-list, amostra, piloto, cotacao, pedido — ou vazio se não ficar claro",
+  "proximo_passo": "próximo passo combinado",
+  "responsavel": "responsável pelo próximo passo",
+  "apoio_comercial": "apoio necessário do comercial, se mencionado"
+}
+
+Se alguma informação não foi mencionada na transcrição, deixe o campo como string vazia "". Não invente informação que não está na transcrição.`;
+}
+
+app.post('/visitas/transcrever', auth, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) throw new Error('Envie um arquivo de áudio.');
+    if (req.file.size > 20 * 1024 * 1024) throw new Error('Áudio muito grande. Máximo 20MB.');
+
+    const transcricao = await transcribeAudio(req.file.buffer, req.file.originalname);
+    if (!transcricao?.trim()) throw new Error('Não foi possível transcrever o áudio — ele pode estar vazio ou sem fala.');
+
+    const raw = await callAI(buildVisitExtractionPrompt(transcricao));
+    let campos;
+    try {
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      campos = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
+    } catch {
+      throw new Error('A IA não retornou um formato válido. Tente novamente.');
+    }
+
+    // Sugere organizações já sincronizadas com nome parecido ao mencionado no áudio
+    let sugestoesOrganizacao = [];
+    if (campos.empresa_unidade) {
+      const r = await pool.query(
+        `SELECT id, accountname FROM crm_organizacoes WHERE accountname ILIKE $1 ORDER BY accountname LIMIT 5`,
+        [`%${campos.empresa_unidade}%`]
+      );
+      sugestoesOrganizacao = r.rows;
+    }
+
+    res.json({ transcricao, campos, sugestoesOrganizacao });
+  } catch (e) {
+    console.error('[visitas/transcrever]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/visitas', auth, async (req, res) => {
+  try {
+    const {
+      account_id, empresa_unidade, data_visita, com_quem, objetivo, resultado,
+      oportunidades, concorrente, estagio, proximo_passo, responsavel,
+      data_proximo_passo, apoio_comercial, transcricao,
+    } = req.body;
+
+    const r = await pool.query(
+      `INSERT INTO crm_visitas
+        (account_id, empresa_unidade, data_visita, com_quem, objetivo, resultado, oportunidades,
+         concorrente, estagio, proximo_passo, responsavel, data_proximo_passo, apoio_comercial, transcricao, criado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       RETURNING id`,
+      [
+        account_id || null, empresa_unidade || null, data_visita || null, com_quem || null,
+        objetivo || null, resultado || null, oportunidades || null, concorrente || null,
+        estagio || null, proximo_passo || null, responsavel || null, data_proximo_passo || null,
+        apoio_comercial || null, transcricao || null, req.user.id,
+      ]
+    );
+    res.json({ id: r.rows[0].id });
+  } catch (e) {
+    console.error('[visitas/salvar]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/visitas', auth, async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+
+    const totalRes = await pool.query('SELECT COUNT(*) FROM crm_visitas');
+    const total = parseInt(totalRes.rows[0].count, 10);
+
+    const r = await pool.query(
+      `SELECT v.*, u.name AS criado_por_nome
+       FROM crm_visitas v
+       LEFT JOIN users u ON u.id = v.criado_por
+       ORDER BY v.criado_em DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+    res.json({ data: r.rows, meta: { page, limit, total, hasMore: offset + limit < total } });
+  } catch (e) {
+    console.error('[visitas/listar]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// PAINEL DE INTELIGÊNCIA
+// ─────────────────────────────────────────────
+
+// Pipeline: valor e contagem por estágio, conversão, tendência mensal, top contas
+app.get('/dashboard/pipeline', auth, async (req, res) => {
+  try {
+    const porEstagio = await pool.query(`
+      SELECT COALESCE(NULLIF(quotestage, ''), 'Sem estágio') AS estagio,
+             COUNT(*) AS qtd, COALESCE(SUM(total), 0) AS valor
+      FROM crm_cotacoes
+      GROUP BY estagio
+      ORDER BY valor DESC
+    `);
+
+    const tendencia = await pool.query(`
+      SELECT to_char(date_trunc('month', (data->>'createdtime')::timestamp), 'YYYY-MM') AS mes,
+             COUNT(*) AS qtd, COALESCE(SUM(total), 0) AS valor
+      FROM crm_cotacoes
+      WHERE data->>'createdtime' IS NOT NULL
+      GROUP BY mes
+      ORDER BY mes DESC
+      LIMIT 6
+    `);
+
+    const topContas = await pool.query(`
+      SELECT c.account_id, COALESCE(o.accountname, 'Sem organização') AS accountname,
+             COUNT(*) AS qtd, COALESCE(SUM(c.total), 0) AS valor
+      FROM crm_cotacoes c
+      LEFT JOIN crm_organizacoes o ON o.id = c.account_id
+      GROUP BY c.account_id, o.accountname
+      ORDER BY valor DESC
+      LIMIT 10
+    `);
+
+    const vencedor = porEstagio.rows.find(r => r.estagio.toLowerCase() === 'vencedor');
+    const perdedor = porEstagio.rows.find(r => r.estagio.toLowerCase() === 'perdedor');
+    const ganhas = Number(vencedor?.qtd || 0);
+    const perdidas = Number(perdedor?.qtd || 0);
+    const taxaConversao = (ganhas + perdidas) > 0 ? ganhas / (ganhas + perdidas) : null;
+    const valorAberto = porEstagio.rows
+      .filter(r => !['vencedor', 'perdedor'].includes(r.estagio.toLowerCase()))
+      .reduce((acc, r) => acc + Number(r.valor), 0);
+
+    res.json({
+      porEstagio: porEstagio.rows.reverse(),
+      tendencia: tendencia.rows.reverse(),
+      topContas: topContas.rows,
+      resumo: { taxaConversao, valorAberto, ganhas, perdidas },
+    });
+  } catch (e) {
+    console.error('[dashboard/pipeline]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Visitas: volume por semana, por pessoa, por estágio relatado, próximos passos vencidos
+app.get('/dashboard/visitas', auth, async (req, res) => {
+  try {
+    const porSemana = await pool.query(`
+      SELECT to_char(date_trunc('week', data_visita), 'DD/MM') AS semana, COUNT(*) AS qtd
+      FROM crm_visitas
+      WHERE data_visita IS NOT NULL AND data_visita >= CURRENT_DATE - INTERVAL '8 weeks'
+      GROUP BY date_trunc('week', data_visita)
+      ORDER BY date_trunc('week', data_visita) ASC
+    `);
+
+    const porPessoa = await pool.query(`
+      SELECT COALESCE(u.name, 'Desconhecido') AS pessoa, COUNT(*) AS qtd
+      FROM crm_visitas v
+      LEFT JOIN users u ON u.id = v.criado_por
+      GROUP BY pessoa
+      ORDER BY qtd DESC
+      LIMIT 10
+    `);
+
+    const porEstagio = await pool.query(`
+      SELECT COALESCE(NULLIF(estagio, ''), 'Não informado') AS estagio, COUNT(*) AS qtd
+      FROM crm_visitas
+      GROUP BY estagio
+      ORDER BY qtd DESC
+    `);
+
+    const vencidos = await pool.query(`
+      SELECT v.id, v.empresa_unidade, v.proximo_passo, v.responsavel, v.data_proximo_passo
+      FROM crm_visitas v
+      WHERE v.data_proximo_passo IS NOT NULL AND v.data_proximo_passo < CURRENT_DATE
+      ORDER BY v.data_proximo_passo ASC
+      LIMIT 20
+    `);
+
+    const totalRes = await pool.query('SELECT COUNT(*) FROM crm_visitas');
+
+    res.json({
+      porSemana: porSemana.rows,
+      porPessoa: porPessoa.rows,
+      porEstagio: porEstagio.rows,
+      proximosPassosVencidos: vencidos.rows,
+      totalVisitas: parseInt(totalRes.rows[0].count, 10),
+    });
+  } catch (e) {
+    console.error('[dashboard/visitas]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Contas: classificação ABC e contas em risco (usando campos que a própria Gluo já calcula)
+app.get('/dashboard/contas', auth, async (req, res) => {
+  try {
+    const porClasse = await pool.query(`
+      SELECT COALESCE(NULLIF(data->>'classificacao_abc_inbrape', ''), 'Sem classe') AS classe, COUNT(*) AS qtd
+      FROM crm_organizacoes
+      GROUP BY classe
+      ORDER BY qtd DESC
+    `);
+
+    const emRisco = await pool.query(`
+      SELECT id, accountname,
+             NULLIF(data->>'dias_sem_venda_inbrape', '')::int AS dias_sem_venda,
+             NULLIF(data->>'valor_ultimo_fat_inbrape', '')::numeric AS ultimo_faturamento,
+             NULLIF(data->>'classificacao_abc_inbrape', '') AS classe
+      FROM crm_organizacoes
+      WHERE NULLIF(data->>'dias_sem_venda_inbrape', '') IS NOT NULL
+        AND NULLIF(data->>'cliente_ativo_inbrape', '') = '1'
+      ORDER BY dias_sem_venda DESC NULLS LAST
+      LIMIT 15
+    `);
+
+    res.json({ porClasse: porClasse.rows, emRisco: emRisco.rows });
+  } catch (e) {
+    console.error('[dashboard/contas]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─────────────────────────────────────────────
 // START
 // ─────────────────────────────────────────────
 initDB().then(async () => {
   await initPDFStandardsTable();
   await initCrmTables();
+  await initVisitasTable();
   app.listen(PORT, () => {
     console.log(`🚀 Server rodando na porta ${PORT}`);
   });

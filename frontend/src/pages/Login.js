@@ -1,171 +1,141 @@
 import React, { useState } from "react";
-
-const EyeIcon = ({ open }) => (
-  <svg
-    fill="none"
-    viewBox="0 0 24 24"
-    stroke="currentColor"
-    strokeWidth={2}
-    style={{ width: 15, height: 15 }}
-  >
-    {open ? (
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
-      />
-    ) : (
-      <>
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-        />
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-        />
-      </>
-    )}
-  </svg>
-);
+import "./Login.css";
 
 const API_URL =
   process.env.REACT_APP_API_URL || "https://inbrape.onrender.com";
 
+const ICONS = {
+  user: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z",
+  mail: "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
+  eye: "M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z",
+  eyeOff:
+    "M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21",
+  alert: "M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+  check: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+  info: "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+  bolt: "M13 10V3L4 14h7v7l9-11h-7z",
+  building: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5",
+  doc: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
+};
+
+const FEATURES = [
+  { icon: "bolt", text: "Análise de textos, planilhas e imagens com IA" },
+  { icon: "building", text: "CRM sincronizado com a Gluo" },
+  { icon: "doc", text: "Editor de PDF, cotações e relatório Power BI" },
+];
+
+const STRENGTH = ["", "Fraca", "Razoável", "Boa", "Forte"];
+function strength(p) {
+  let s = 0;
+  if (p.length >= 6) s++;
+  if (p.length >= 10) s++;
+  if (/[A-Z]/.test(p) && /[a-z]/.test(p)) s++;
+  if (/\d/.test(p) && /[^A-Za-z0-9]/.test(p)) s++;
+  return s;
+}
+
+const Icon = ({ d, size = 16 }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ width: size, height: size, flexShrink: 0 }}
+    aria-hidden="true"
+  >
+    <path d={d} />
+  </svg>
+);
+
 function Field({
-  label,
-  type,
-  placeholder,
-  value,
-  onChange,
-  icon,
-  showToggle,
-  show,
-  onToggle,
+  label, icon, value, onChange, placeholder,
+  type = "text", password, autoComplete, index = 0, children,
 }) {
+  const [show, setShow] = useState(false);
+  const [caps, setCaps] = useState(false);
+  const id = `lg-${label.replace(/\s/g, "")}`;
   return (
-    <div style={{ marginBottom: 14 }}>
-      <label
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          color: "#475569",
-          letterSpacing: "0.8px",
-          textTransform: "uppercase",
-          display: "block",
-          marginBottom: 6,
-        }}
-      >
-        {label}
-      </label>
-      <div style={{ position: "relative" }}>
-        <div
-          style={{
-            position: "absolute",
-            left: 11,
-            top: "50%",
-            transform: "translateY(-50%)",
-            color: "#94A3B8",
-            pointerEvents: "none",
-          }}
-        >
-          {icon}
-        </div>
+    <div className="lg-field" style={{ "--i": index }}>
+      <label htmlFor={id} className="lg-sr">{label}</label>
+      <div className="lg-box">
         <input
-          type={showToggle ? (show ? "text" : "password") : type}
+          id={id}
+          type={password ? (show ? "text" : "password") : type}
           placeholder={placeholder}
           value={value}
           onChange={onChange}
-          style={{
-            width: "100%",
-            padding: `10px ${showToggle ? "38px" : "12px"} 10px 36px`,
-            background: "#F8FAFC",
-            border: "1.5px solid #E2E8F0",
-            borderRadius: 9,
-            fontSize: 13,
-            color: "#1E293B",
-            outline: "none",
-            fontFamily: "inherit",
-            boxSizing: "border-box",
-          }}
-          onFocus={(e) => (e.target.style.borderColor = "#1B4F8A")}
-          onBlur={(e) => (e.target.style.borderColor = "#E2E8F0")}
+          autoComplete={autoComplete}
+          onKeyUp={password ? (e) => setCaps(!!e.getModifierState?.("CapsLock")) : undefined}
+          onBlur={() => setCaps(false)}
         />
-        {showToggle && (
+        {password ? (
           <button
             type="button"
-            onClick={onToggle}
-            style={{
-              position: "absolute",
-              right: 10,
-              top: "50%",
-              transform: "translateY(-50%)",
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              color: "#94A3B8",
-              padding: 3,
-            }}
+            className="lg-end lg-eye"
+            onClick={() => setShow((s) => !s)}
+            aria-label={show ? "Ocultar senha" : "Mostrar senha"}
           >
-            <EyeIcon open={show} />
+            <Icon d={show ? ICONS.eyeOff : ICONS.eye} />
           </button>
+        ) : (
+          <span className="lg-end lg-ico"><Icon d={ICONS[icon]} /></span>
         )}
       </div>
+      {caps && (
+        <div className="lg-caps"><Icon d={ICONS.alert} size={12} /> Caps Lock ligado</div>
+      )}
+      {children}
     </div>
   );
 }
 
-const PersonIcon = () => (
-  <svg
-    fill="none"
-    viewBox="0 0 24 24"
-    stroke="currentColor"
-    strokeWidth={2}
-    style={{ width: 15, height: 15 }}
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-    />
-  </svg>
-);
-const LockIcon = () => (
-  <svg
-    fill="none"
-    viewBox="0 0 24 24"
-    stroke="currentColor"
-    strokeWidth={2}
-    style={{ width: 15, height: 15 }}
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-    />
-  </svg>
-);
-const MailIcon = () => (
-  <svg
-    fill="none"
-    viewBox="0 0 24 24"
-    stroke="currentColor"
-    strokeWidth={2}
-    style={{ width: 15, height: 15 }}
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-    />
-  </svg>
-);
+// Formas fluidas no estilo da referência, com as cores da Inbrape
+function PanelArt() {
+  const edge = "M330 -20 C345 200 300 340 200 450 C120 530 40 570 -20 610";
+  return (
+    <svg className="lg-art" viewBox="0 0 500 740" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs>
+        <linearGradient id="pgBg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#030b3f" /><stop offset="1" stopColor="#0a2a8f" />
+        </linearGradient>
+        <linearGradient id="pgA" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#5b7cff" /><stop offset=".6" stopColor="#2a45d6" /><stop offset="1" stopColor="#1a2fa8" />
+        </linearGradient>
+        <linearGradient id="pgB" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#020733" /><stop offset=".55" stopColor="#1b2fb5" /><stop offset="1" stopColor="#3d63f0" />
+        </linearGradient>
+        <linearGradient id="pgEdge" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#d4c8ff" /><stop offset="1" stopColor="#8ea2ff" stopOpacity=".25" />
+        </linearGradient>
+        <radialGradient id="pgGlow">
+          <stop offset="0" stopColor="#E87722" stopOpacity=".6" /><stop offset="1" stopColor="#E87722" stopOpacity="0" />
+        </radialGradient>
+        <filter id="pgBlur"><feGaussianBlur stdDeviation="9" /></filter>
+      </defs>
+      <rect width="500" height="740" fill="url(#pgBg)" />
+      <circle cx="440" cy="80" r="200" fill="url(#pgGlow)" className="lg-pulse" />
+      <g className="lg-sway">
+        <path d="M-20 -20 H330 C345 200 300 340 200 450 C120 530 40 570 -20 610 Z" fill="url(#pgA)" />
+        <path d={edge} fill="none" stroke="url(#pgEdge)" strokeWidth="12" filter="url(#pgBlur)" opacity=".75" />
+        <path d={edge} fill="none" stroke="url(#pgEdge)" strokeWidth="3" />
+      </g>
+      <g className="lg-sway2">
+        <path d="M-20 760 V600 C90 540 190 470 290 470 C370 470 420 570 520 560 V760 Z" fill="url(#pgB)" />
+        <path d="M-20 600 C90 540 190 470 290 470 C370 470 420 570 520 560" fill="none" stroke="rgba(196,186,255,.55)" strokeWidth="2.5" />
+      </g>
+    </svg>
+  );
+}
 
 export default function Login({ onLogin }) {
   const [tab, setTab] = useState("login");
-  const [login, setLogin] = useState({ username: "", password: "" });
+  const [login, setLogin] = useState({
+    username: localStorage.getItem("ai_last_user") || "",
+    password: "",
+  });
+  const [remember, setRemember] = useState(!!localStorage.getItem("ai_last_user"));
   const [register, setRegister] = useState({
     username: "",
     name: "",
@@ -175,14 +145,24 @@ export default function Login({ onLogin }) {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [errKey, setErrKey] = useState(0);
   const [success, setSuccess] = useState("");
-  const [showPass, setShowPass] = useState(false);
-  const [showRegPass, setShowRegPass] = useState(false);
+
+  function fail(msg) {
+    setError(msg);
+    setErrKey((k) => k + 1);
+  }
+
+  function switchTab(next) {
+    setTab(next);
+    setError("");
+    setSuccess("");
+  }
 
   async function handleLogin(e) {
     e.preventDefault();
     if (!login.username || !login.password) {
-      setError("Preencha todos os campos.");
+      fail("Preencha todos os campos.");
       return;
     }
     setLoading(true);
@@ -195,506 +175,167 @@ export default function Login({ onLogin }) {
       });
       const data = await r.json();
       if (!r.ok) {
-        setError(data.error);
+        fail(data.error || "Não foi possível entrar.");
         return;
       }
+      if (remember) localStorage.setItem("ai_last_user", login.username);
+      else localStorage.removeItem("ai_last_user");
       localStorage.setItem("ai_token", data.token);
       localStorage.setItem("ai_user", JSON.stringify(data.user));
       onLogin(data.user);
     } catch {
-      setError("Erro de conexão com o servidor.");
+      fail("Erro de conexão com o servidor.");
     } finally {
       setLoading(false);
     }
   }
 
   async function handleRegister(e) {
-  e.preventDefault();
-  if (!register.username || !register.name || !register.email || !register.password) {
-    setError("Preencha todos os campos.");
-    return;
-  }
-  if (register.password !== register.confirm) {
-    setError("As senhas não coincidem.");
-    return;
-  }
-  if (register.password.length < 6) {
-    setError("Senha deve ter pelo menos 6 caracteres.");
-    return;
-  }
-  setLoading(true);
-  setError("");
-  setSuccess("");
-  try {
-    const r = await fetch(`${API_URL}/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: register.username,
-        name: register.name,
-        email: register.email,
-        password: register.password,
-      }),
-    });
-    const data = await r.json();
-    if (!r.ok) {
-      setError(data.error);
+    e.preventDefault();
+    if (!register.username || !register.name || !register.email || !register.password) {
+      fail("Preencha todos os campos.");
       return;
     }
-    setSuccess("Solicitação enviada! Aguarde aprovação do administrador.");
-    setRegister({ username: "", name: "", email: "", password: "", confirm: "" });
-    setTimeout(() => { setTab("login"); setSuccess(""); }, 4000);
-  } catch {
-    setError("Erro de conexão com o servidor.");
-  } finally {
-    setLoading(false);
+    if (register.password !== register.confirm) {
+      fail("As senhas não coincidem.");
+      return;
+    }
+    if (register.password.length < 6) {
+      fail("Senha deve ter pelo menos 6 caracteres.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    setSuccess("");
+    try {
+      const r = await fetch(`${API_URL}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: register.username,
+          name: register.name,
+          email: register.email,
+          password: register.password,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        fail(data.error || "Não foi possível enviar a solicitação.");
+        return;
+      }
+      setSuccess("Solicitação enviada! Aguarde aprovação do administrador.");
+      setRegister({ username: "", name: "", email: "", password: "", confirm: "" });
+      setTimeout(() => { setTab("login"); setSuccess(""); }, 4000);
+    } catch {
+      fail("Erro de conexão com o servidor.");
+    } finally {
+      setLoading(false);
+    }
   }
-}
+
+  const s = strength(register.password);
+  const spinner = <span className="lg-spin" />;
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        background:
-          "linear-gradient(135deg,#002855 0%,#1B4F8A 60%,#2E6DB4 100%)",
-        fontFamily: "'Inter','Segoe UI',system-ui,sans-serif",
-      }}
-    >
-      <div
-        style={{
-          height: 4,
-          background: "linear-gradient(90deg,#E87722,#F5A623,#E87722)",
-        }}
-      />
-      <div
-        style={{
-          padding: "22px 36px",
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-        }}
-      >
-        <div
-          style={{
-            background: "white",
-            borderRadius: 8,
-            padding: "5px 10px",
-            boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
-            display: "flex",
-            alignItems: "center",
-          }}
-        >
-          <img
-            src="https://cic-rs.ind.br/wp-content/uploads/2025/06/INBRAPE-2.jpeg"
-            alt="Inbrape"
-            style={{ height: 24, width: "auto" }}
-          />
-        </div>
-        <div
-          style={{ width: 1, height: 28, background: "rgba(255,255,255,0.2)" }}
-        />
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "white" }}>
-            AI Doc Analyzer
-          </div>
-          <div
-            style={{
-              fontSize: 10,
-              color: "rgba(255,255,255,0.45)",
-              marginTop: 1,
-            }}
-          >
-            Sistema de análise inteligente
-          </div>
-        </div>
-      </div>
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "16px",
-        }}
-      >
-        <div
-          style={{
-            background: "white",
-            borderRadius: 20,
-            padding: "36px 32px",
-            width: "100%",
-            maxWidth: 420,
-            boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
-          }}
-        >
-          <div
-            style={{
-              width: 50,
-              height: 50,
-              background: "#EAF0F8",
-              borderRadius: 14,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              margin: "0 auto 18px",
-              color: "#002855",
-            }}
-          >
-            <svg
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-              style={{ width: 24, height: 24 }}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-              />
-            </svg>
-          </div>
-          <h1
-            style={{
-              fontSize: 20,
-              fontWeight: 800,
-              color: "#002855",
-              textAlign: "center",
-              marginBottom: 4,
-            }}
-          >
-            {tab === "login" ? "Acesso ao sistema" : "Solicitar acesso"}
-          </h1>
-          <p
-            style={{
-              fontSize: 12,
-              color: "#94A3B8",
-              textAlign: "center",
-              marginBottom: 22,
-            }}
-          >
-            {tab === "login"
-              ? "Entre com suas credenciais"
-              : "Preencha os dados para solicitar uma conta"}
-          </p>
-          <div
-            style={{
-              display: "flex",
-              background: "#F1F5F9",
-              borderRadius: 10,
-              padding: 3,
-              marginBottom: 24,
-            }}
-          >
-            <button
-              style={{
-                flex: 1,
-                padding: "8px",
-                border: "none",
-                borderRadius: 8,
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                background: tab === "login" ? "white" : "transparent",
-                color: tab === "login" ? "#002855" : "#94A3B8",
-                boxShadow:
-                  tab === "login" ? "0 1px 4px rgba(0,0,0,0.1)" : "none",
-              }}
-              onClick={() => {
-                setTab("login");
-                setError("");
-                setSuccess("");
-              }}
-            >
-              Entrar
-            </button>
-            <button
-              style={{
-                flex: 1,
-                padding: "8px",
-                border: "none",
-                borderRadius: 8,
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                background: tab === "register" ? "white" : "transparent",
-                color: tab === "register" ? "#002855" : "#94A3B8",
-                boxShadow:
-                  tab === "register" ? "0 1px 4px rgba(0,0,0,0.1)" : "none",
-              }}
-              onClick={() => {
-                setTab("register");
-                setError("");
-                setSuccess("");
-              }}
-            >
-              Criar conta
-            </button>
-          </div>
-          {error && (
-            <div
-              style={{
-                background: "#FEF2F2",
-                border: "1px solid #FCA5A5",
-                borderRadius: 8,
-                padding: "9px 12px",
-                fontSize: 12,
-                color: "#DC2626",
-                display: "flex",
-                gap: 7,
-                alignItems: "center",
-                marginBottom: 14,
-              }}
-            >
-              <svg
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-                style={{ width: 13, height: 13, flexShrink: 0 }}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              {error}
-            </div>
-          )}
-          {success && (
-            <div
-              style={{
-                background: "#ECFDF5",
-                border: "1px solid #6EE7B7",
-                borderRadius: 8,
-                padding: "9px 12px",
-                fontSize: 12,
-                color: "#059669",
-                display: "flex",
-                gap: 7,
-                alignItems: "center",
-                marginBottom: 14,
-              }}
-            >
-              <svg
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-                style={{ width: 13, height: 13, flexShrink: 0 }}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              {success}
-            </div>
-          )}
-          {tab === "login" ? (
-            <form onSubmit={handleLogin}>
-              <Field
-                label="Usuário"
-                type="text"
-                placeholder="seu.usuario"
-                value={login.username}
-                onChange={(e) =>
-                  setLogin((f) => ({ ...f, username: e.target.value }))
-                }
-                icon={<PersonIcon />}
-              />
-              <Field
-                label="Senha"
-                type="password"
-                placeholder="••••••••"
-                value={login.password}
-                onChange={(e) =>
-                  setLogin((f) => ({ ...f, password: e.target.value }))
-                }
-                icon={<LockIcon />}
-                showToggle
-                show={showPass}
-                onToggle={() => setShowPass((s) => !s)}
-              />
-              <button
-                type="submit"
-                disabled={loading}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  background: "#E87722",
-                  border: "none",
-                  borderRadius: 10,
-                  color: "white",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  cursor: loading ? "not-allowed" : "pointer",
-                  fontFamily: "inherit",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 7,
-                  boxShadow: "0 4px 14px rgba(232,119,34,0.32)",
-                  opacity: loading ? 0.7 : 1,
-                }}
-              >
-                {loading ? (
-                  <>
-                    <div
-                      style={{
-                        width: 14,
-                        height: 14,
-                        border: "2px solid rgba(255,255,255,0.3)",
-                        borderTopColor: "white",
-                        borderRadius: "50%",
-                        animation: "spin 0.65s linear infinite",
-                      }}
-                    />
-                    Entrando...
-                  </>
-                ) : (
-                  <>Entrar no sistema</>
-                )}
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleRegister}>
-              <Field
-                label="Nome completo"
-                type="text"
-                placeholder="Seu Nome"
-                value={register.name}
-                onChange={(e) =>
-                  setRegister((f) => ({ ...f, name: e.target.value }))
-                }
-                icon={<PersonIcon />}
-              />
-              <Field
-                label="Usuário"
-                type="text"
-                placeholder="seu.usuario"
-                value={register.username}
-                onChange={(e) =>
-                  setRegister((f) => ({ ...f, username: e.target.value }))
-                }
-                icon={<PersonIcon />}
-              />
-              <Field
-                label="E-mail"
-                type="email"
-                placeholder="email@inbrape.com.br"
-                value={register.email}
-                onChange={(e) =>
-                  setRegister((f) => ({ ...f, email: e.target.value }))
-                }
-                icon={<MailIcon />}
-              />
-              <Field
-                label="Senha"
-                type="password"
-                placeholder="Mínimo 6 caracteres"
-                value={register.password}
-                onChange={(e) =>
-                  setRegister((f) => ({ ...f, password: e.target.value }))
-                }
-                icon={<LockIcon />}
-                showToggle
-                show={showRegPass}
-                onToggle={() => setShowRegPass((s) => !s)}
-              />
-              <Field
-                label="Confirmar senha"
-                type="password"
-                placeholder="Repita a senha"
-                value={register.confirm}
-                onChange={(e) =>
-                  setRegister((f) => ({ ...f, confirm: e.target.value }))
-                }
-                icon={<LockIcon />}
-              />
-              <div
-                style={{
-                  background: "#EAF0F8",
-                  border: "1px solid rgba(0,40,85,0.1)",
-                  borderRadius: 8,
-                  padding: "9px 12px",
-                  fontSize: 11,
-                  color: "#1B4F8A",
-                  marginBottom: 14,
-                  display: "flex",
-                  gap: 6,
-                }}
-              >
-                <svg
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  style={{ width: 13, height: 13, flexShrink: 0, marginTop: 1 }}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Sua conta será ativada após aprovação do administrador.
+    <div className="lg">
+      <div className="lg-card">
+        <section className="lg-left">
+          <div className="lg-form-wrap">
+            <img className="lg-logo" src="https://cic-rs.ind.br/wp-content/uploads/2025/06/INBRAPE-2.jpeg" alt="Inbrape" />
+            <h1>{tab === "login" ? "Bem-vindo de volta" : "Solicitar acesso"}</h1>
+            <p className="lg-sub">
+              {tab === "login"
+                ? "Insira seus dados para entrar."
+                : "Preencha os dados para solicitar uma conta."}
+            </p>
+
+            {error && (
+              <div className="lg-alert err" key={errKey} role="alert">
+                <Icon d={ICONS.alert} size={15} />{error}
               </div>
-              <button
-                type="submit"
-                disabled={loading}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  background: "#002855",
-                  border: "none",
-                  borderRadius: 10,
-                  color: "white",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  cursor: loading ? "not-allowed" : "pointer",
-                  fontFamily: "inherit",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 7,
-                  opacity: loading ? 0.7 : 1,
-                }}
-              >
-                {loading ? (
-                  <>
-                    <div
-                      style={{
-                        width: 14,
-                        height: 14,
-                        border: "2px solid rgba(255,255,255,0.3)",
-                        borderTopColor: "white",
-                        borderRadius: "50%",
-                        animation: "spin 0.65s linear infinite",
-                      }}
-                    />
-                    Enviando...
-                  </>
-                ) : (
-                  <>Solicitar acesso</>
-                )}
-              </button>
-            </form>
-          )}
-        </div>
+            )}
+            {success && (
+              <div className="lg-alert ok" role="status">
+                <Icon d={ICONS.check} size={15} />{success}
+              </div>
+            )}
+
+            {tab === "login" ? (
+              <form key="login" onSubmit={handleLogin} className="lg-form">
+                <Field index={0} label="Usuário" icon="user" placeholder="Usuário" autoComplete="username"
+                  value={login.username} onChange={(e) => setLogin((f) => ({ ...f, username: e.target.value }))} />
+                <Field index={1} label="Senha" password placeholder="Senha" autoComplete="current-password"
+                  value={login.password} onChange={(e) => setLogin((f) => ({ ...f, password: e.target.value }))} />
+                <label className="lg-remember" style={{ "--i": 2 }}>
+                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                  Lembrar meu usuário
+                </label>
+                <button type="submit" className="lg-btn" disabled={loading} style={{ "--i": 3 }}>
+                  {loading ? <>{spinner}Entrando...</> : "Entrar"}
+                </button>
+              </form>
+            ) : (
+              <form key="register" onSubmit={handleRegister} className="lg-form">
+                <Field index={0} label="Nome completo" icon="user" placeholder="Nome completo" autoComplete="name"
+                  value={register.name} onChange={(e) => setRegister((f) => ({ ...f, name: e.target.value }))} />
+                <Field index={1} label="Usuário" icon="user" placeholder="Usuário" autoComplete="username"
+                  value={register.username} onChange={(e) => setRegister((f) => ({ ...f, username: e.target.value }))} />
+                <Field index={2} label="E-mail" icon="mail" type="email" placeholder="E-mail" autoComplete="email"
+                  value={register.email} onChange={(e) => setRegister((f) => ({ ...f, email: e.target.value }))} />
+                <Field index={3} label="Senha" password placeholder="Senha (mínimo 6 caracteres)" autoComplete="new-password"
+                  value={register.password} onChange={(e) => setRegister((f) => ({ ...f, password: e.target.value }))}>
+                  {register.password && (
+                    <div className="lg-meter" data-s={s}>
+                      <i /><i /><i /><i />
+                      <span>{STRENGTH[s]}</span>
+                    </div>
+                  )}
+                </Field>
+                <Field index={4} label="Confirmar senha" password placeholder="Confirmar senha" autoComplete="new-password"
+                  value={register.confirm} onChange={(e) => setRegister((f) => ({ ...f, confirm: e.target.value }))}>
+                  {register.confirm && (
+                    <div className={`lg-match ${register.confirm === register.password ? "yes" : "no"}`}>
+                      {register.confirm === register.password ? "Senhas coincidem" : "As senhas não coincidem"}
+                    </div>
+                  )}
+                </Field>
+                <div className="lg-note" style={{ "--i": 5 }}>
+                  <Icon d={ICONS.info} size={14} />
+                  Sua conta será ativada após aprovação do administrador.
+                </div>
+                <button type="submit" className="lg-btn" disabled={loading} style={{ "--i": 6 }}>
+                  {loading ? <>{spinner}Enviando...</> : "Solicitar acesso"}
+                </button>
+              </form>
+            )}
+
+            <div className="lg-or"><span>ou</span></div>
+            <button
+              type="button"
+              className="lg-btn ghost"
+              onClick={() => switchTab(tab === "login" ? "register" : "login")}
+            >
+              {tab === "login" ? "Solicitar acesso" : "Já tenho conta"}
+            </button>
+          </div>
+        </section>
+
+        <aside className="lg-panel">
+          <PanelArt />
+          <div className="lg-glass">
+            <h2>Documentos, cotações e dados da Inbrape num só lugar.</h2>
+            <ul>
+              {FEATURES.map((f) => (
+                <li key={f.icon}>
+                  <span><Icon d={ICONS[f.icon]} size={15} /></span>
+                  {f.text}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </aside>
       </div>
-      <div style={{ padding: "14px", textAlign: "center" }}>
-        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>
-          © 2026 Inbrape Tecidos Industriais · Sistema interno
-        </p>
-      </div>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}*{box-sizing:border-box}`}</style>
+      <p className="lg-copy">© 2026 Inbrape Tecidos Industriais · Sistema interno</p>
     </div>
   );
 }

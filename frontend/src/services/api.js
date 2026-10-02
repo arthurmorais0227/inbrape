@@ -85,3 +85,47 @@ export async function getCrmSyncStatus() {
   if (!r.ok) throw new Error('Erro ao consultar status da sincronização.');
   return await r.json();
 }
+
+export async function transcreverVisita(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await fetch(`${API_URL}/visitas/transcrever`, { method: 'POST', headers: authHeaders(), body: fd });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Erro ao transcrever áudio.');
+  return data;
+}
+
+export async function salvarVisita(payload) {
+  const r = await fetch(`${API_URL}/visitas`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Erro ao salvar relatório.');
+  return data;
+}
+
+export async function listarVisitas(page = 1, limit = 20) {
+  const r = await fetch(`${API_URL}/visitas?page=${page}&limit=${limit}`, { headers: authHeaders() });
+  if (!r.ok) throw new Error('Erro ao listar relatórios.');
+  return r.json();
+}
+
+export async function getDashboardPipeline() {
+  const r = await fetch(`${API_URL}/dashboard/pipeline`, { headers: authHeaders() });
+  if (!r.ok) throw new Error('Erro ao buscar dados de pipeline.');
+  return r.json();
+}
+
+export async function getDashboardVisitas() {
+  const r = await fetch(`${API_URL}/dashboard/visitas`, { headers: authHeaders() });
+  if (!r.ok) throw new Error('Erro ao buscar dados de visitas.');
+  return r.json();
+}
+
+export async function getDashboardContas() {
+  const r = await fetch(`${API_URL}/dashboard/contas`, { headers: authHeaders() });
+  if (!r.ok) throw new Error('Erro ao buscar dados de contas.');
+  return r.json();
+}

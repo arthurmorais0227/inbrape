@@ -24,6 +24,12 @@ const QUICK = [
 ];
 
 const TOOLS = [
+  { label: 'Painel', desc: 'Indicadores de pipeline, visitas e contas.', page: 'dashboard', color: '#024088',
+    d: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
+  { label: 'Visitas', desc: 'Transcreva áudios e registre relatórios de visita.', page: 'visitas', color: '#E87722',
+    d: 'M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2M12 19v4m-4 0h8' },
+  { label: 'Usuários', desc: 'Gerencie usuários e PDFs padrão.', page: 'admin', adminOnly: true, color: '#64748B',
+    d: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z' },
   { label: 'CRM', desc: 'Clientes, contas e oportunidades.', page: 'crm', color: '#0EA5E9',
     d: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5' },
   { label: 'Analisar texto', desc: 'Resumo, palavras-chave e insights.', page: 'text', color: '#002855',
@@ -213,7 +219,7 @@ export default function Home({ user, onNavigate = () => {} }) {
   const [q, setQ] = useState('');
   const match = (i) => `${i.label} ${i.desc}`.toLowerCase().includes(q.trim().toLowerCase());
   const quick = QUICK.filter(match);
-  const tools = TOOLS.filter(match);
+  const tools = TOOLS.filter((item) => (!item.adminOnly || user?.role === 'admin') && match(item));
   const first = user?.name?.split(' ')[0];
 
   return (

@@ -9,6 +9,9 @@ import History from "./pages/History";
 import AdminPanel from "./pages/AdminPanel";
 import Crm from "./pages/Crm";
 import Home from "./pages/Home";
+import Dashboard from "./pages/Dashboard";
+import VisitaAudio from "./pages/VisitaAudio";
+import NavBar from "./pages/NavBar";
 import "./App.css";
 
 
@@ -243,12 +246,24 @@ export default function App() {
         component: Home,
       },
       {
+        id: "dashboard",
+        label: "Painel",
+        d: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
+        component: Dashboard,
+      },
+      {
         id: "text",
         label: "Texto",
         d: "M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z",
         component: (props) => (
           <TextAnalyzer {...props} onNotify={(msg) => notify(msg, "text")} />
         ),
+      },
+      {
+        id: "visitas",
+        label: "Visitas",
+        d: "M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2M12 19v4m-4 0h8",
+        component: (props) => <VisitaAudio {...props} onNotify={(msg) => notify(msg, "visitas")} />,
       },
       {
         id: "excel",
@@ -418,48 +433,13 @@ export default function App() {
         <div className="header-stripe" />
       </header>
 
-      <div className="tabs-wrapper">
-        <nav className="tabs">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              className={`tab-btn ${activeTab === tab.id ? "active" : ""}`}
-              onClick={() => setActiveTab(tab.id)}
-              style={{ position: "relative" }}
-            >
-              <svg
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-                style={{ width: 15, height: 15 }}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d={tab.d} />
-              </svg>
-              {tab.label}
-              {tab.id === "admin" && pendingCount > 0 && (
-                <span
-                  style={{
-                    position: "absolute",
-                    top: 8,
-                    right: 6,
-                    background: "#E87722",
-                    color: "white",
-                    borderRadius: 10,
-                    padding: "0 5px",
-                    fontSize: 9,
-                    fontWeight: 700,
-                    minWidth: 16,
-                    textAlign: "center",
-                  }}
-                >
-                  {pendingCount}
-                </span>
-              )}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <NavBar
+        tabs={TABS}
+        active={activeTab}
+        onChange={setActiveTab}
+        badges={{ admin: pendingCount }}
+        primary={["home", "pdf", "crm", "excel"]}
+      />
 
       <main className="main">
         {activeTab === "text" && (
@@ -474,7 +454,11 @@ export default function App() {
         {activeTab === "document" && (
           <DocumentAnalyzer onNotify={(msg) => notify(msg, "document")} />
         )}
-        {activeTab === "home" && <Home onNavigate={setActiveTab} />}
+        {activeTab === "visitas" && (
+          <VisitaAudio onNotify={(msg) => notify(msg, "visitas")} />
+        )}
+        {activeTab === "home" && <Home user={user} onNavigate={setActiveTab} />}
+        {activeTab === "dashboard" && <Dashboard />}
         {activeTab === "pdf" && <PDFEditor />}
         {activeTab === "history" && <History />}
         {activeTab === "admin" && <AdminPanel />}
