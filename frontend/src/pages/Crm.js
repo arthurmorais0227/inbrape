@@ -3,6 +3,7 @@ import {
   getCrmOrganizacoes, getCrmCotacoes, getCrmOrganizacoesNomes,
   getCrmOrganizacoesFiltros,
   triggerCrmSync, getCrmSyncStatus,
+  exportCrmOrganizacoes, exportCrmCotacoes,
 } from '../services/api';
 import './Crm.css';
 
@@ -35,6 +36,7 @@ const ICONS = {
   sync: 'M16 4v4h-4M4 20v-4h4M4 8a8 8 0 0114-4.9M20 16a8 8 0 01-14 4.9',
   alert: 'M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z',
   inbox: 'M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z',
+  download: 'M12 3v12m0 0l-4-4m4 4l4-4M5 21h14',
 };
 
 // Colunas de Cotações espelhando o CRM oficial (Total | Nome Representante |
@@ -140,14 +142,8 @@ function DetailPanel({ item, moduleKey, onClose, orgMap }) {
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape') onClose(); }
     document.addEventListener('keydown', onKey);
-    // Trava a rolagem da página enquanto o modal está aberto
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     panelRef.current?.focus();
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
   const entries = Object.entries(item)
@@ -156,7 +152,7 @@ function DetailPanel({ item, moduleKey, onClose, orgMap }) {
 
   return (
     <div className="crm-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="crm-panel" role="dialog" aria-modal="true" aria-label={title} ref={panelRef} tabIndex={-1}>
+      <div className="crm-panel" ref={panelRef} tabIndex={-1}>
         <div className="crm-panel-header">
           <div className="crm-avatar">{initials(title)}</div>
           <div className="crm-panel-heading">
@@ -217,7 +213,11 @@ function formatDateTime(iso) {
   try { return new Date(iso).toLocaleString('pt-BR'); } catch { return iso; }
 }
 
-const EMPTY_COT_FILTERS = { subject: '', total: '', nome_representante_inbrape: '', quotestage: '', account_name: '', complemento_inbrape: '', produto_inbrape: '', cod_representante_inbrape: '' };
+const EMPTY_COT_FILTERS = {
+  subject: '', total: '', nome_representante_inbrape: '', quotestage: '', account_name: '',
+  complemento_inbrape: '', produto_inbrape: '', cod_representante_inbrape: '',
+  data_de: '', data_ate: '',
+};
 
 export default function Crm({ onNotify }) {
   const [moduleKey, setModuleKey] = useState('organizacoes');
@@ -245,6 +245,7 @@ export default function Crm({ onNotify }) {
 
   const [syncStatus, setSyncStatus] = useState(null);
   const [syncStarting, setSyncStarting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const pollRef = useRef(null);
 
   const config = MODULES[moduleKey];
@@ -360,6 +361,22 @@ export default function Crm({ onNotify }) {
     }
   }
 
+  async function handleExport() {
+    setExporting(true);
+    try {
+      if (moduleKey === 'organizacoes') {
+        await exportCrmOrganizacoes(search, filterValue);
+      } else {
+        await exportCrmCotacoes(cotApplied);
+      }
+      onNotify?.('Excel exportado', 'crm');
+    } catch (e) {
+      onNotify?.(e.message || 'Erro ao exportar Excel', 'crm');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const isSyncing = !!syncStatus?.running;
 
   return (
@@ -372,10 +389,16 @@ export default function Crm({ onNotify }) {
             {syncStatus?.finishedAt && !isSyncing && ` · última sync: ${formatDateTime(syncStatus.finishedAt)}`}
           </p>
         </div>
-        <button className="crm-btn-icon-text" onClick={handleSync} disabled={isSyncing || syncStarting}>
-          <Icon d={ICONS.sync} size={14} />
-          {isSyncing ? `Sincronizando ${syncStatus.module || ''} (pág. ${syncStatus.page || 0}${syncStatus.totalPages ? `/${syncStatus.totalPages}` : ''})…` : 'Sincronizar agora'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="crm-btn-icon-text" onClick={handleExport} disabled={exporting || total === 0}>
+            <Icon d={ICONS.download} size={14} />
+            {exporting ? 'Exportando…' : 'Exportar Excel'}
+          </button>
+          <button className="crm-btn-icon-text" onClick={handleSync} disabled={isSyncing || syncStarting}>
+            <Icon d={ICONS.sync} size={14} />
+            {isSyncing ? `Sincronizando ${syncStatus.module || ''} (pág. ${syncStatus.page || 0}${syncStatus.totalPages ? `/${syncStatus.totalPages}` : ''})…` : 'Sincronizar agora'}
+          </button>
+        </div>
       </div>
 
       <div className="crm-segmented">
@@ -426,6 +449,14 @@ export default function Crm({ onNotify }) {
                 <input value={cotDraft[c.filterKey]} onChange={(e) => setCotDraft((f) => ({ ...f, [c.filterKey]: e.target.value }))} onKeyDown={onCotFieldKeyDown} />
               </label>
             ))}
+            <label className="crm-cot-field">
+              <span>Emissão (de)</span>
+              <input type="date" value={cotDraft.data_de} onChange={(e) => setCotDraft((f) => ({ ...f, data_de: e.target.value }))} onKeyDown={onCotFieldKeyDown} />
+            </label>
+            <label className="crm-cot-field">
+              <span>Emissão (até)</span>
+              <input type="date" value={cotDraft.data_ate} onChange={(e) => setCotDraft((f) => ({ ...f, data_ate: e.target.value }))} onKeyDown={onCotFieldKeyDown} />
+            </label>
           </div>
           <div className="crm-cot-filters-actions">
             <button className="crm-btn-primary" onClick={applyCotFilters}>

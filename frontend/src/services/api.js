@@ -51,8 +51,7 @@ export async function getCrmOrganizacoes(page = 1, limit = 20, q = '', filter = 
   return await r.json();
 }
 
-// Agora recebe um objeto de filtros por coluna, ex:
-// { subject: 'manga', quotestage: 'aberto', account_name: 'windwerk', total: '500' }
+// Recebe um objeto de filtros por coluna, incluindo agora data_de / data_ate
 export async function getCrmCotacoes(page = 1, limit = 20, filters = {}) {
   const params = new URLSearchParams({ page, limit });
   Object.entries(filters).forEach(([k, v]) => { if (v) params.set(k, v); });
@@ -84,6 +83,34 @@ export async function getCrmSyncStatus() {
   const r = await fetch(`${API_URL}/crm/sync/status`, { headers: authHeaders() });
   if (!r.ok) throw new Error('Erro ao consultar status da sincronização.');
   return await r.json();
+}
+
+// Baixa o Excel respeitando os filtros atuais (mesmos params usados na listagem)
+async function downloadFile(url, filename) {
+  const r = await fetch(url, { headers: authHeaders() });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Erro ao exportar.'); }
+  const blob = await r.blob();
+  const objUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(objUrl);
+}
+
+export async function exportCrmOrganizacoes(q = '', filter = '') {
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (filter) params.set('filter', filter);
+  await downloadFile(`${API_URL}/crm/organizacoes/export?${params}`, 'organizacoes.xlsx');
+}
+
+export async function exportCrmCotacoes(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([k, v]) => { if (v) params.set(k, v); });
+  await downloadFile(`${API_URL}/crm/cotacoes/export?${params}`, 'cotacoes.xlsx');
 }
 
 export async function transcreverVisita(file) {
