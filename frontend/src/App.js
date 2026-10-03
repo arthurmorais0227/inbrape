@@ -441,7 +441,7 @@ export default function App() {
         primary={["home", "pdf", "crm", "excel"]}
       />
 
-      <main className="main">
+      <main className={`main${activeTab === "crm" ? " main-crm" : ""}`}>
         {activeTab === "text" && (
           <TextAnalyzer onNotify={(msg) => notify(msg, "text")} />
         )}

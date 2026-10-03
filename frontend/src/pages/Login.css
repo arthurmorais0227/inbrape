@@ -7,6 +7,9 @@
   --line: #d9dde5;
 
   min-height: 100vh;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -17,6 +20,77 @@
   background:
     radial-gradient(600px 400px at 100% 0%, rgba(232, 119, 34, 0.25), transparent 65%),
     linear-gradient(135deg, #012a63 0%, var(--blue) 55%, #0b4fb3 100%);
+}
+.lg::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: -45%;
+  pointer-events: none;
+  background:
+    linear-gradient(112deg, transparent 28%, rgba(232, 119, 34, 0.11) 42%, rgba(232, 119, 34, 0.03) 48%, transparent 56%),
+    linear-gradient(112deg, transparent 43%, rgba(46, 109, 180, 0.34) 55%, rgba(46, 109, 180, 0.08) 63%, transparent 72%);
+  filter: blur(48px);
+  opacity: 0.8;
+  transform: translate3d(-7%, -1%, 0) rotate(-7deg) scale(1.1);
+  animation: lg-color-flow 46s ease-in-out infinite alternate;
+}
+.lg-card, .lg-copy { position: relative; z-index: 1; }
+
+/* ---------- Manchas flutuantes no fundo ---------- */
+.lg-blobs {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  isolation: isolate;
+}
+
+.lg-blob {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.55;
+  will-change: transform;
+  mix-blend-mode: screen;
+}
+
+.lg-blob-1 {
+  width: 420px;
+  height: 420px;
+  top: -120px;
+  left: -100px;
+  background: rgba(30, 100, 210, 0.65);
+  animation: lg-blob-float-1 18s ease-in-out infinite alternate;
+}
+
+.lg-blob-2 {
+  width: 300px;
+  height: 300px;
+  top: 5%;
+  right: -80px;
+  background: rgba(232, 119, 34, 0.58);
+  animation: lg-blob-float-2 15s ease-in-out infinite alternate;
+}
+
+.lg-blob-3 {
+  width: 360px;
+  height: 360px;
+  bottom: -140px;
+  left: 20%;
+  background: rgba(65, 130, 240, 0.5);
+  animation: lg-blob-float-3 21s ease-in-out infinite alternate;
+}
+
+.lg-blob-4 {
+  width: 220px;
+  height: 220px;
+  bottom: 8%;
+  right: 18%;
+  background: rgba(232, 119, 34, 0.35);
+  animation: lg-blob-float-4 17s ease-in-out infinite alternate;
 }
 
 /* ---------- Cartão ---------- */
@@ -140,9 +214,38 @@
 @keyframes lg-spin { to { transform: rotate(360deg); } }
 @keyframes lg-sway { from { transform: translate(0, 0); } to { transform: translate(14px, -18px); } }
 @keyframes lg-pulse { 0%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.12); opacity: 1; } }
+@keyframes lg-blob-float-1 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  25% { transform: translate3d(120px, 80px, 0) scale(1.12); }
+  50% { transform: translate3d(220px, -20px, 0) scale(0.92); }
+  75% { transform: translate3d(100px, -100px, 0) scale(1.08); }
+  100% { transform: translate3d(-30px, 40px, 0) scale(1); }
+}
+@keyframes lg-blob-float-2 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  30% { transform: translate3d(-120px, 90px, 0) scale(1.15); }
+  60% { transform: translate3d(-220px, -30px, 0) scale(0.9); }
+  100% { transform: translate3d(-70px, -130px, 0) scale(1.08); }
+}
+@keyframes lg-blob-float-3 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  35% { transform: translate3d(-150px, -90px, 0) scale(1.12); }
+  70% { transform: translate3d(120px, -160px, 0) scale(0.9); }
+  100% { transform: translate3d(200px, 20px, 0) scale(1.1); }
+}
+@keyframes lg-blob-float-4 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  40% { transform: translate3d(-100px, -120px, 0) scale(1.2); }
+  70% { transform: translate3d(80px, -180px, 0) scale(0.85); }
+  100% { transform: translate3d(160px, -50px, 0) scale(1.1); }
+}
+@keyframes lg-color-flow {
+  from { transform: translate3d(-7%, -1%, 0) rotate(-7deg) scale(1.1); }
+  to { transform: translate3d(7%, 2%, 0) rotate(-7deg) scale(1.1); }
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .lg *, .lg *::before, .lg *::after { animation: none !important; transition: none !important; }
+  .lg, .lg::before, .lg *, .lg *::before, .lg *::after { animation: none !important; transition: none !important; }
 }
 
 /* ---------- Responsivo ---------- */

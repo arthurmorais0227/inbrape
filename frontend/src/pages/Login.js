@@ -238,6 +238,12 @@ export default function Login({ onLogin }) {
 
   return (
     <div className="lg">
+      <div className="lg-blobs" aria-hidden="true">
+        <span className="lg-blob lg-blob-1"></span>
+        <span className="lg-blob lg-blob-2"></span>
+        <span className="lg-blob lg-blob-3"></span>
+        <span className="lg-blob lg-blob-4"></span>
+      </div>
       <div className="lg-card">
         <section className="lg-left">
           <div className="lg-form-wrap">
