@@ -5,6 +5,8 @@ import {
   triggerCrmSync, getCrmSyncStatus,
   exportCrmOrganizacoes, exportCrmCotacoes, exportCrmPedidos,
 } from '../services/api';
+import { reportRange } from './CrmReports';
+import CrmReports from './CrmReports';
 import './Crm.css';
 
 const PAGE_SIZE = 20;
@@ -122,12 +124,38 @@ function emptyFiltersFor(config) {
 }
 
 const STAGE_STYLES = {
-  aberto: 'info', aberta: 'info', open: 'info',
+  aberto: 'neutral', aberta: 'neutral', open: 'neutral',
   vencedor: 'success', ganho: 'success', ganha: 'success', won: 'success',
   perdedor: 'danger', perdida: 'danger', perdido: 'danger', lost: 'danger',
   cancelado: 'danger', cancelada: 'danger', cancelled: 'danger', canceled: 'danger',
   created: 'neutral', approved: 'info', delivered: 'success', invoiced: 'success', shipped: 'info',
 };
+const STATUS_LABELS = {
+  delivered: 'Entregue',
+  cancelled: 'Cancelado',
+  canceled: 'Cancelado',
+  cancelado: 'Cancelado',
+  cancelada: 'Cancelado',
+  open: 'Aberto',
+  aberto: 'Aberto',
+  aberta: 'Aberto',
+  created: 'Criado',
+  approved: 'Aprovado',
+  invoiced: 'Faturado',
+  shipped: 'Enviado',
+  won: 'Ganho',
+  vencedor: 'Ganho',
+  ganha: 'Ganho',
+  ganho: 'Ganho',
+  lost: 'Perdido',
+  perdedor: 'Perdido',
+  perdida: 'Perdido',
+  perdido: 'Perdido',
+};
+function normalizeStatus(value) {
+  const status = String(value || '').trim();
+  return STATUS_LABELS[status.toLowerCase()] || status;
+}
 function stageStyle(value) {
   if (!value) return 'neutral';
   return STAGE_STYLES[String(value).toLowerCase()] || 'neutral';
@@ -150,6 +178,9 @@ function formatMoney(value) {
   if (Number.isNaN(n)) return String(value);
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
+function StatusBadge({ value }) {
+  return <span className={`crm-pill crm-pill-${stageStyle(value)}`}>{normalizeStatus(value)}</span>;
+}
 function pickFirst(item, keys) {
   for (const k of keys) {
     const v = rawValue(item, k);
@@ -170,7 +201,7 @@ const HIDDEN_DETAIL_KEYS = new Set(['smownerid', 'smcreatorid', 'modifiedby', 'r
 function Cell({ col, item, orgMap }) {
   const value = resolveValue(item, col.key, orgMap);
   if (!value) return <span className="crm-cell-empty">—</span>;
-  if (col.pill) return <span className={`crm-pill crm-pill-${stageStyle(value)}`}>{value}</span>;
+  if (col.pill) return <StatusBadge value={value} />;
   if (col.money) return <span className="crm-cell-money">{formatMoney(value)}</span>;
   return <span>{value}</span>;
 }
@@ -214,7 +245,7 @@ function DetailPanel({ item, moduleKey, onClose, orgMap }) {
                 <div>
                   <div className="crm-highlight-label">{col.label}</div>
                   <div className="crm-highlight-value">
-                    {col.pill ? <span className={`crm-pill crm-pill-${stageStyle(value)}`}>{value}</span> : col.money ? formatMoney(value) : value}
+                    {col.pill ? <StatusBadge value={value} /> : col.money ? formatMoney(value) : value}
                   </div>
                 </div>
               </div>
@@ -275,6 +306,7 @@ export default function Crm({ onNotify }) {
   // Cotações / Pedidos: um campo de busca por coluna (genérico pros dois)
   const [colDraft, setColDraft] = useState({});
   const [colApplied, setColApplied] = useState({});
+  const [activeReportId, setActiveReportId] = useState(null);
 
   const [orgMap, setOrgMap] = useState(null);
   const [orgMapLoading, setOrgMapLoading] = useState(false);
@@ -384,17 +416,44 @@ export default function Crm({ onNotify }) {
     const empty = emptyFiltersFor(newConfig);
     setColDraft(empty);
     setColApplied(empty);
+    setActiveReportId(null);
+  }
+
+  function applyReport(report) {
+    const reportConfig = MODULES[report.module];
+    if (!reportConfig) return;
+
+    const filters = emptyFiltersFor(reportConfig);
+    const { from, to } = reportRange(report);
+    if (report.stage) {
+      const stageValues = { open: 'aberto', won: 'won', lost: 'lost' };
+      filters[report.module === 'pedidos' ? 'sostatus' : 'quotestage'] = stageValues[report.stage] || report.stage;
+    }
+    if (from) filters.data_de = from;
+    if (to) filters.data_ate = to;
+
+    setModuleKey(report.module);
+    setPage(1);
+    setSelected(null);
+    setSearchInput('');
+    setSearch('');
+    setFilterValue('');
+    setColDraft(filters);
+    setColApplied(filters);
+    setActiveReportId(report.id);
   }
 
   function applyColFilters() {
     setPage(1);
     setColApplied(colDraft);
+    setActiveReportId(null);
   }
   function clearColFilters() {
     const empty = emptyFiltersFor(config);
     setColDraft(empty);
     setColApplied(empty);
     setPage(1);
+    setActiveReportId(null);
   }
   function onColFieldKeyDown(e) {
     if (e.key === 'Enter') applyColFilters();
@@ -433,6 +492,7 @@ export default function Crm({ onNotify }) {
 
   return (
     <div className="crm">
+      <CrmReports activeId={activeReportId} onSelect={applyReport} onClear={clearColFilters} />
       <div className="crm-header">
         <div>
           <h1 className="page-title">CRM</h1>

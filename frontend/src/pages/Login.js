@@ -238,11 +238,8 @@ export default function Login({ onLogin }) {
 
   return (
     <div className="lg">
-      <div className="lg-blobs" aria-hidden="true">
-        <span className="lg-blob lg-blob-1"></span>
-        <span className="lg-blob lg-blob-2"></span>
-        <span className="lg-blob lg-blob-3"></span>
-        <span className="lg-blob lg-blob-4"></span>
+      <div className="lg-bg" aria-hidden="true">
+        <span className="b1" /><span className="b2" /><span className="b3" /><span className="b4" />
       </div>
       <div className="lg-card">
         <section className="lg-left">

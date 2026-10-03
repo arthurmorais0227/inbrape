@@ -806,6 +806,65 @@ const syncState = {
   error: null,
 };
 
+const CRM_STATUS_TRANSLATIONS = {
+  created: 'Criado',
+  delivered: 'Entregue',
+  cancelled: 'Cancelado',
+  canceled: 'Cancelado',
+  open: 'Aberto',
+  won: 'Vencedor',
+  lost: 'Perdedor',
+  approved: 'Aprovado',
+  rejected: 'Rejeitado',
+  invoiced: 'Faturado',
+  pending: 'Pendente',
+  closed: 'Fechado',
+  paid: 'Pago',
+  draft: 'Rascunho',
+  active: 'Ativo',
+  inactive: 'Inativo',
+  archived: 'Arquivado',
+  default: 'Padrão',
+};
+
+function translateCrmStatusValue(value) {
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim();
+  if (!normalized) return value;
+  const translated = CRM_STATUS_TRANSLATIONS[normalized.toLowerCase()];
+  return translated || normalized.charAt(0).toUpperCase() + normalized.slice(1).toLowerCase();
+}
+
+function translateCrmRecord(record) {
+  if (!record || typeof record !== 'object') return record;
+
+  if (Array.isArray(record)) {
+    return record.map((item) => translateCrmRecord(item));
+  }
+
+  const translated = {};
+  for (const [key, value] of Object.entries(record)) {
+    const lowerKey = String(key).toLowerCase();
+    if (value && typeof value === 'object') {
+      translated[key] = translateCrmRecord(value);
+      continue;
+    }
+
+    if (typeof value === 'string' && (
+      lowerKey.includes('status') ||
+      lowerKey.includes('stage') ||
+      lowerKey.includes('state') ||
+      lowerKey.includes('estado')
+    )) {
+      translated[key] = translateCrmStatusValue(value);
+      continue;
+    }
+
+    translated[key] = value;
+  }
+  return translated;
+}
+
 function buildSearchText(record) {
   return Object.values(record)
     .filter((v) => typeof v === 'string')
@@ -1046,7 +1105,7 @@ async function initCrmTables() {
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_produto ON crm_cotacoes USING gin (produto_inbrape gin_trgm_ops)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_complemento ON crm_cotacoes USING gin (complemento_inbrape gin_trgm_ops)');
   await pool.query('DROP INDEX IF EXISTS idx_crm_cot_codrepr');
-  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_codrepr ON crm_cotacoes USING gin (cod_representante_inbrape gin_trgm_ops)');
+  await pool.query('CREATE INDEX idx_crm_cot_codrepr ON crm_cotacoes USING gin (cod_representante_inbrape gin_trgm_ops)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_total ON crm_cotacoes (total)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_data_emissao ON crm_cotacoes (data_emissao)');
 
@@ -1108,7 +1167,25 @@ function buildColumnFilterWhere(query, { table, statusCol, dateCol, textCols, mi
     const v = (query[col] || '').trim();
     if (v) { params.push(`%${v}%`); conditions.push(`c.${col} ILIKE $${params.length}`); }
   });
-  if (quotestage) { params.push(quotestage); conditions.push(`LOWER(c.${statusCol}) = LOWER($${params.length})`); }
+  if (quotestage) {
+    const normalizedStage = quotestage.toLowerCase();
+    const stageAliases = {
+      open: ['aberto', 'aberta', 'open'],
+      won: ['vencedor', 'ganho', 'ganha', 'won'],
+      lost: ['perdedor', 'perdida', 'perdido', 'lost'],
+    };
+    const aliasKey = normalizedStage === 'aberto' || normalizedStage === 'aberta' ? 'open'
+      : normalizedStage === 'vencedor' || normalizedStage === 'ganho' || normalizedStage === 'ganha' ? 'won'
+        : normalizedStage === 'perdedor' || normalizedStage === 'perdida' || normalizedStage === 'perdido' ? 'lost'
+          : normalizedStage;
+    if (statusCol === 'quotestage' && stageAliases[aliasKey]) {
+      params.push(stageAliases[aliasKey]);
+      conditions.push(`LOWER(c.${statusCol}) = ANY($${params.length})`);
+    } else {
+      params.push(quotestage);
+      conditions.push(`LOWER(c.${statusCol}) = LOWER($${params.length})`);
+    }
+  }
   if (totalFilter) {
     const n = Number(totalFilter.replace(',', '.'));
     if (!Number.isNaN(n)) { params.push(n); conditions.push(`c.total = $${params.length}`); }
@@ -1152,7 +1229,10 @@ function buildListRoute(buildWhereFn) {
         listParams
       );
       const total = dataRes.rows.length > 0 ? parseInt(dataRes.rows[0].total_count, 10) : 0;
-      res.json({ data: dataRes.rows.map((r) => r.data), meta: { page, limit, total, hasMore: offset + limit < total } });
+      res.json({
+        data: dataRes.rows.map((r) => translateCrmRecord(r.data)),
+        meta: { page, limit, total, hasMore: offset + limit < total },
+      });
     } catch (err) {
       console.error(`[list ${req.path}]`, err.message);
       res.status(500).json({ error: err.message });
@@ -1177,7 +1257,10 @@ app.get('/crm/organizacoes', auth, async (req, res) => {
       listParams
     );
     const total = dataRes.rows.length > 0 ? parseInt(dataRes.rows[0].total_count, 10) : 0;
-    res.json({ data: dataRes.rows.map((r) => r.data), meta: { page, limit, total, hasMore: offset + limit < total } });
+    res.json({
+      data: dataRes.rows.map((r) => translateCrmRecord(r.data)),
+      meta: { page, limit, total, hasMore: offset + limit < total },
+    });
   } catch (err) {
     console.error('[crm/organizacoes]', err.message);
     res.status(500).json({ error: err.message });
@@ -1286,12 +1369,16 @@ app.get('/crm/cotacoes/export', auth, async (req, res) => {
     });
     ws.getRow(1).height = 22;
 
-    const STAGE_ARGB = { vencedor: 'FFD1FAE5', perdedor: 'FFFEE2E2', aberto: 'FFDBEAFE' };
+    const STAGE_ARGB = {
+      vencedor: 'FFD1FAE5',
+      perdedor: 'FFFEE2E2',
+      aberto: 'FFBDBDBD',
+    };
     r.rows.forEach((row, i) => {
       const d = row.data;
       const line = ws.addRow({
         _subject: d.subject || '', _quote_no: d.quote_no || '', _cliente: row.cliente_nome || '',
-        _representante: d.nome_representante_inbrape || '', _status: d.quotestage || '',
+        _representante: d.nome_representante_inbrape || '', _status: translateCrmStatusValue(d.quotestage || ''),
         _total: d.total != null ? Number(d.total) : null, _data_emissao: d.data_emissao_inbrape || '',
         _produto: d.produto_inbrape || '', _complemento: d.complemento_inbrape || '', _cod_rep: d.cod_representante_inbrape || '',
       });
@@ -1348,12 +1435,19 @@ app.get('/crm/pedidos/export', auth, async (req, res) => {
     });
     ws.getRow(1).height = 22;
 
-    const STATUS_ARGB = { delivered: 'FFD1FAE5', invoiced: 'FFD1FAE5', cancelled: 'FFFEE2E2', canceled: 'FFFEE2E2', created: 'FFF1F5F9', approved: 'FFDBEAFE' };
+    const STATUS_ARGB = {
+      delivered: 'FF86EFAC',
+      invoiced: 'FF86EFAC',
+      cancelled: 'FFFCA5A5',
+      canceled: 'FFFCA5A5',
+      created: 'FFDBDBDB',
+      approved: 'FFDBEAFE',
+    };
     r.rows.forEach((row, i) => {
       const d = row.data;
       const line = ws.addRow({
         _subject: d.subject || '', _pedido_no: d.salesorder_no || '', _cliente: row.cliente_nome || '',
-        _representante: d.nome_representante_inbrape || '', _status: d.sostatus || '',
+        _representante: d.nome_representante_inbrape || '', _status: translateCrmStatusValue(d.sostatus || ''),
         _total: d.total != null ? Number(d.total) : null, _data_pedido: d.data_pedido_inbrape || '',
         _produto: d.produto_inbrape || '', _complemento: d.complemento_inbrape || '', _cod_rep: d.cod_representante_inbrape || '',
       });

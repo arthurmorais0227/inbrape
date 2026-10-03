@@ -282,17 +282,20 @@
 /* Pills de status */
 .crm-pill {
   display: inline-block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  padding: 3px 10px;
+  padding: 4px 10px;
   border-radius: 999px;
+  border: 1px solid transparent;
+  line-height: 1.2;
+  text-transform: none;
   white-space: nowrap;
 }
-.crm-pill-neutral { background: var(--gray-100); color: var(--gray-600); }
-.crm-pill-info { background: var(--navy-pale); color: var(--navy-mid); }
-.crm-pill-success { background: var(--success-bg); color: var(--success); }
-.crm-pill-danger { background: var(--error-bg); color: var(--error); }
-.crm-pill-warning { background: var(--orange-pale); color: var(--orange-dark); }
+.crm-pill-neutral { background: #F3F4F6; color: #374151; border-color: #D1D5DB; }
+.crm-pill-info { background: #EAF0F8; color: #1B4F8A; border-color: #D6E4F0; }
+.crm-pill-success { background: #DCFCE7; color: #166534; border-color: #86EFAC; }
+.crm-pill-danger { background: #FEE2E2; color: #991B1B; border-color: #FCA5A5; }
+.crm-pill-warning { background: #FEF3C7; color: #92400E; border-color: #FCD34D; }
 
 /* Skeleton loading */
 .crm-skel {
