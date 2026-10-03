@@ -60,6 +60,14 @@ export async function getCrmCotacoes(page = 1, limit = 20, filters = {}) {
   return await r.json();
 }
 
+export async function getCrmPedidos(page = 1, limit = 20, filters = {}) {
+  const params = new URLSearchParams({ page, limit });
+  Object.entries(filters).forEach(([k, v]) => { if (v) params.set(k, v); });
+  const r = await fetch(`${API_URL}/crm/pedidos?${params}`, { headers: authHeaders() });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Erro ao buscar pedidos de venda.'); }
+  return await r.json();
+}
+
 export async function getCrmOrganizacoesNomes() {
   const r = await fetch(`${API_URL}/crm/organizacoes-nomes`, { headers: authHeaders() });
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Erro ao buscar nomes de organizações.'); }
@@ -72,8 +80,12 @@ export async function getCrmOrganizacoesFiltros() {
   return await r.json();
 }
 
-export async function triggerCrmSync() {
-  const r = await fetch(`${API_URL}/crm/sync`, { method: 'POST', headers: authHeaders() });
+export async function triggerCrmSync(module = 'all') {
+  const r = await fetch(`${API_URL}/crm/sync`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ module }),
+  });
   const json = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(json.error || 'Erro ao iniciar sincronização.');
   return json;
@@ -111,6 +123,12 @@ export async function exportCrmCotacoes(filters = {}) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([k, v]) => { if (v) params.set(k, v); });
   await downloadFile(`${API_URL}/crm/cotacoes/export?${params}`, 'cotacoes.xlsx');
+}
+
+export async function exportCrmPedidos(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([k, v]) => { if (v) params.set(k, v); });
+  await downloadFile(`${API_URL}/crm/pedidos/export?${params}`, 'pedidos_venda.xlsx');
 }
 
 export async function transcreverVisita(file) {

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  getCrmOrganizacoes, getCrmCotacoes, getCrmOrganizacoesNomes,
+  getCrmOrganizacoes, getCrmCotacoes, getCrmPedidos, getCrmOrganizacoesNomes,
   getCrmOrganizacoesFiltros,
   triggerCrmSync, getCrmSyncStatus,
-  exportCrmOrganizacoes, exportCrmCotacoes,
+  exportCrmOrganizacoes, exportCrmCotacoes, exportCrmPedidos,
 } from '../services/api';
 import './Crm.css';
 
@@ -19,6 +19,7 @@ const Icon = ({ d, size = 16, ...props }) => (
 const ICONS = {
   building: 'M3 21h18M5 21V7l8-4v18M19 21V11l-6-4M9 9h1m-1 4h1m-1 4h1',
   quote: 'M7 8h10M7 12h6m-9 8l3-3H6a2 2 0 01-2-2V6a2 2 0 012-2h12a2 2 0 012 2v9a2 2 0 01-2 2H9l-3 3z',
+  package: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
   search: 'M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z',
   filter: 'M6 12h12M3 6h18M9 18h6',
   phone: 'M3 5a2 2 0 012-2h2.28a1 1 0 01.98.804l.786 3.93a1 1 0 01-.276.94L7.1 10.35a12 12 0 005.55 5.55l1.677-1.677a1 1 0 01.94-.276l3.93.786a1 1 0 01.804.98V19a2 2 0 01-2 2h-1C9.163 21 3 14.837 3 7V5z',
@@ -39,10 +40,9 @@ const ICONS = {
   download: 'M12 3v12m0 0l-4-4m4 4l4-4M5 21h14',
 };
 
-// Colunas de Cotações espelhando o CRM oficial (Total | Nome Representante |
-// Assunto | Estágio Cotação | Nome Organização | Complemento | Produto | Cod Representante).
-// "Assunto" é a coluna-título (com avatar), as outras 7 aparecem depois, cada
-// uma com seu próprio campo de busca — igual à tela oficial.
+// Colunas espelhando o CRM oficial — cada uma com seu próprio campo de busca.
+// Cotações e Pedidos de Venda usam o mesmo padrão (filtro por coluna); só
+// mudam os nomes dos campos de status/data por trás.
 const COTACAO_COLUMNS = [
   { key: 'total', label: 'Total', icon: ICONS.currency, money: true, filterKey: 'total', filterLabel: 'Total' },
   { key: 'nome_representante_inbrape', label: 'Nome Representante', icon: ICONS.user, filterKey: 'nome_representante_inbrape', filterLabel: 'Nome Representante' },
@@ -52,13 +52,23 @@ const COTACAO_COLUMNS = [
   { key: 'produto_inbrape', label: 'Produto', icon: ICONS.tag, filterKey: 'produto_inbrape', filterLabel: 'Produto' },
   { key: 'cod_representante_inbrape', label: 'Cod Representante', icon: ICONS.id, filterKey: 'cod_representante_inbrape', filterLabel: 'Cod Representante' },
 ];
-const COTACAO_TITLE_FILTER = { filterKey: 'subject', filterLabel: 'Assunto' };
+
+const PEDIDO_COLUMNS = [
+  { key: 'total', label: 'Total', icon: ICONS.currency, money: true, filterKey: 'total', filterLabel: 'Total' },
+  { key: 'nome_representante_inbrape', label: 'Nome Representante', icon: ICONS.user, filterKey: 'nome_representante_inbrape', filterLabel: 'Nome Representante' },
+  { key: 'sostatus', label: 'Status do Pedido', icon: ICONS.tag, pill: true, filterKey: 'sostatus', filterLabel: 'Status do Pedido' },
+  { key: 'account_id', label: 'Nome Organização', icon: ICONS.building, filterKey: 'account_name', filterLabel: 'Nome Organização' },
+  { key: 'complemento_inbrape', label: 'Complemento', icon: ICONS.note, filterKey: 'complemento_inbrape', filterLabel: 'Complemento' },
+  { key: 'produto_inbrape', label: 'Produto', icon: ICONS.tag, filterKey: 'produto_inbrape', filterLabel: 'Produto' },
+  { key: 'cod_representante_inbrape', label: 'Cod Representante', icon: ICONS.id, filterKey: 'cod_representante_inbrape', filterLabel: 'Cod Representante' },
+];
 
 const MODULES = {
   organizacoes: {
     label: 'Organizações',
     icon: ICONS.building,
     singular: 'organização',
+    titleColumnLabel: 'Nome',
     titleKeys: ['accountname', 'name'],
     subtitleKeys: ['industry', 'cpfcnpj'],
     columns: [
@@ -69,22 +79,54 @@ const MODULES = {
     ],
     filterLabel: 'Segmento',
     getFiltros: getCrmOrganizacoesFiltros,
+    listFn: (pg, limit, _col, search, filterValue) => getCrmOrganizacoes(pg, limit, search, filterValue),
+    exportFn: (_col, search, filterValue) => exportCrmOrganizacoes(search, filterValue),
   },
   cotacoes: {
     label: 'Cotações',
     icon: ICONS.quote,
     singular: 'cotação',
+    titleColumnLabel: 'Assunto',
     titleKeys: ['subject', 'quotename', 'quote_no'],
     subtitleKeys: ['quote_no'],
     columns: COTACAO_COLUMNS,
+    usesColumnFilters: true,
+    titleFilterKey: 'subject',
+    titleFilterLabel: 'Assunto',
+    dateFilterLabel: 'Emissão',
+    listFn: (pg, limit, col) => getCrmCotacoes(pg, limit, col),
+    exportFn: (col) => exportCrmCotacoes(col),
+  },
+  pedidos: {
+    label: 'Pedidos de Venda',
+    icon: ICONS.package,
+    singular: 'pedido',
+    titleColumnLabel: 'Assunto',
+    titleKeys: ['subject', 'salesorder_no'],
+    subtitleKeys: ['salesorder_no'],
+    columns: PEDIDO_COLUMNS,
+    usesColumnFilters: true,
+    titleFilterKey: 'subject',
+    titleFilterLabel: 'Assunto',
+    dateFilterLabel: 'Pedido',
+    listFn: (pg, limit, col) => getCrmPedidos(pg, limit, col),
+    exportFn: (col) => exportCrmPedidos(col),
   },
 };
+
+function emptyFiltersFor(config) {
+  if (!config.usesColumnFilters) return {};
+  const f = { [config.titleFilterKey]: '', data_de: '', data_ate: '' };
+  config.columns.forEach((c) => { f[c.filterKey] = ''; });
+  return f;
+}
 
 const STAGE_STYLES = {
   aberto: 'info', aberta: 'info', open: 'info',
   vencedor: 'success', ganho: 'success', ganha: 'success', won: 'success',
   perdedor: 'danger', perdida: 'danger', perdido: 'danger', lost: 'danger',
-  cancelado: 'danger', cancelada: 'danger',
+  cancelado: 'danger', cancelada: 'danger', cancelled: 'danger', canceled: 'danger',
+  created: 'neutral', approved: 'info', delivered: 'success', invoiced: 'success', shipped: 'info',
 };
 function stageStyle(value) {
   if (!value) return 'neutral';
@@ -213,12 +255,6 @@ function formatDateTime(iso) {
   try { return new Date(iso).toLocaleString('pt-BR'); } catch { return iso; }
 }
 
-const EMPTY_COT_FILTERS = {
-  subject: '', total: '', nome_representante_inbrape: '', quotestage: '', account_name: '',
-  complemento_inbrape: '', produto_inbrape: '', cod_representante_inbrape: '',
-  data_de: '', data_ate: '',
-};
-
 export default function Crm({ onNotify }) {
   const [moduleKey, setModuleKey] = useState('organizacoes');
   const [items, setItems] = useState([]);
@@ -229,24 +265,26 @@ export default function Crm({ onNotify }) {
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(null);
 
-  // Organizações: busca única + dropdown (como já estava)
+  // Organizações: busca única + dropdown
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [filterValue, setFilterValue] = useState('');
   const [filterOptions, setFilterOptions] = useState([]);
   const [filterOpen, setFilterOpen] = useState(false);
 
-  // Cotações: um campo de busca por coluna, igual ao CRM oficial
-  const [cotDraft, setCotDraft] = useState(EMPTY_COT_FILTERS);
-  const [cotApplied, setCotApplied] = useState(EMPTY_COT_FILTERS);
+  // Cotações / Pedidos: um campo de busca por coluna (genérico pros dois)
+  const [colDraft, setColDraft] = useState({});
+  const [colApplied, setColApplied] = useState({});
 
   const [orgMap, setOrgMap] = useState(null);
   const [orgMapLoading, setOrgMapLoading] = useState(false);
 
   const [syncStatus, setSyncStatus] = useState(null);
   const [syncStarting, setSyncStarting] = useState(false);
+  const [syncMenuOpen, setSyncMenuOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const pollRef = useRef(null);
+  const syncMenuRef = useRef(null);
 
   const config = MODULES[moduleKey];
 
@@ -255,16 +293,12 @@ export default function Crm({ onNotify }) {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  const fetchData = useCallback(async (mod, pg, searchState, cotState) => {
+  const fetchData = useCallback(async (mod, pg, searchState, colState) => {
     setLoading(true);
     setError('');
     try {
-      let res;
-      if (mod === 'organizacoes') {
-        res = await getCrmOrganizacoes(pg, PAGE_SIZE, searchState.search, searchState.filterValue);
-      } else {
-        res = await getCrmCotacoes(pg, PAGE_SIZE, cotState);
-      }
+      const modConfig = MODULES[mod];
+      const res = await modConfig.listFn(pg, PAGE_SIZE, colState, searchState.search, searchState.filterValue);
       setItems(res.data || []);
       setTotal(res.meta?.total ?? 0);
       setHasMore(res.meta?.hasMore ?? false);
@@ -279,16 +313,16 @@ export default function Crm({ onNotify }) {
   }, []);
 
   useEffect(() => {
-    fetchData(moduleKey, page, { search, filterValue }, cotApplied);
-  }, [moduleKey, page, search, filterValue, cotApplied, fetchData]);
+    fetchData(moduleKey, page, { search, filterValue }, colApplied);
+  }, [moduleKey, page, search, filterValue, colApplied, fetchData]);
 
   useEffect(() => {
-    if (moduleKey !== 'organizacoes') return;
+    if (config.usesColumnFilters || !config.getFiltros) return;
     config.getFiltros().then((res) => setFilterOptions(res.data || [])).catch(() => setFilterOptions([]));
   }, [moduleKey, config]);
 
   useEffect(() => {
-    if (moduleKey !== 'cotacoes' || orgMap !== null || orgMapLoading) return;
+    if (moduleKey === 'organizacoes' || orgMap !== null || orgMapLoading) return;
     setOrgMapLoading(true);
     getCrmOrganizacoesNomes()
       .then((res) => {
@@ -306,13 +340,30 @@ export default function Crm({ onNotify }) {
   }, []);
 
   useEffect(() => {
+    if (!syncMenuOpen) return undefined;
+    function closeMenu(event) {
+      if (event.type === 'keydown' && event.key === 'Escape') {
+        setSyncMenuOpen(false);
+      } else if (event.type === 'pointerdown' && !syncMenuRef.current?.contains(event.target)) {
+        setSyncMenuOpen(false);
+      }
+    }
+    document.addEventListener('pointerdown', closeMenu);
+    document.addEventListener('keydown', closeMenu);
+    return () => {
+      document.removeEventListener('pointerdown', closeMenu);
+      document.removeEventListener('keydown', closeMenu);
+    };
+  }, [syncMenuOpen]);
+
+  useEffect(() => {
     if (syncStatus?.running) {
       pollRef.current = setInterval(() => {
         getCrmSyncStatus().then((s) => {
           setSyncStatus(s);
           if (!s.running) {
             clearInterval(pollRef.current);
-            fetchData(moduleKey, page, { search, filterValue }, cotApplied);
+            fetchData(moduleKey, page, { search, filterValue }, colApplied);
             onNotify?.('Sincronização com o CRM concluída', 'crm');
           }
         }).catch(() => {});
@@ -323,37 +374,42 @@ export default function Crm({ onNotify }) {
 
   function switchModule(mod) {
     if (mod === moduleKey) return;
+    const newConfig = MODULES[mod];
     setModuleKey(mod);
     setPage(1);
     setSelected(null);
     setSearchInput('');
     setSearch('');
     setFilterValue('');
-    setCotDraft(EMPTY_COT_FILTERS);
-    setCotApplied(EMPTY_COT_FILTERS);
+    const empty = emptyFiltersFor(newConfig);
+    setColDraft(empty);
+    setColApplied(empty);
   }
 
-  function applyCotFilters() {
+  function applyColFilters() {
     setPage(1);
-    setCotApplied(cotDraft);
+    setColApplied(colDraft);
   }
-  function clearCotFilters() {
-    setCotDraft(EMPTY_COT_FILTERS);
-    setCotApplied(EMPTY_COT_FILTERS);
+  function clearColFilters() {
+    const empty = emptyFiltersFor(config);
+    setColDraft(empty);
+    setColApplied(empty);
     setPage(1);
   }
-  function onCotFieldKeyDown(e) {
-    if (e.key === 'Enter') applyCotFilters();
+  function onColFieldKeyDown(e) {
+    if (e.key === 'Enter') applyColFilters();
   }
-  const hasActiveCotFilters = Object.values(cotApplied).some(Boolean);
+  const hasActiveColFilters = Object.values(colApplied).some(Boolean);
 
-  async function handleSync() {
+  async function handleSync(module) {
+    setSyncMenuOpen(false);
     setSyncStarting(true);
     try {
-      await triggerCrmSync();
+      await triggerCrmSync(module);
       const s = await getCrmSyncStatus();
       setSyncStatus(s);
-      onNotify?.('Sincronização com o CRM iniciada', 'crm');
+      const label = module === 'all' ? 'todos os módulos' : MODULES[module]?.label.toLowerCase();
+      onNotify?.(`Sincronização de ${label} iniciada`, 'crm');
     } catch (e) {
       onNotify?.(e.message || 'Erro ao iniciar sincronização', 'crm');
     } finally {
@@ -364,11 +420,7 @@ export default function Crm({ onNotify }) {
   async function handleExport() {
     setExporting(true);
     try {
-      if (moduleKey === 'organizacoes') {
-        await exportCrmOrganizacoes(search, filterValue);
-      } else {
-        await exportCrmCotacoes(cotApplied);
-      }
+      await config.exportFn(colApplied, search, filterValue);
       onNotify?.('Excel exportado', 'crm');
     } catch (e) {
       onNotify?.(e.message || 'Erro ao exportar Excel', 'crm');
@@ -389,15 +441,43 @@ export default function Crm({ onNotify }) {
             {syncStatus?.finishedAt && !isSyncing && ` · última sync: ${formatDateTime(syncStatus.finishedAt)}`}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="crm-header-actions">
           <button className="crm-btn-icon-text" onClick={handleExport} disabled={exporting || total === 0}>
             <Icon d={ICONS.download} size={14} />
             {exporting ? 'Exportando…' : 'Exportar Excel'}
           </button>
-          <button className="crm-btn-icon-text" onClick={handleSync} disabled={isSyncing || syncStarting}>
-            <Icon d={ICONS.sync} size={14} />
-            {isSyncing ? `Sincronizando ${syncStatus.module || ''} (pág. ${syncStatus.page || 0}${syncStatus.totalPages ? `/${syncStatus.totalPages}` : ''})…` : 'Sincronizar agora'}
-          </button>
+          <div className="crm-sync-menu" ref={syncMenuRef}>
+            <button
+              className="crm-btn-icon-text"
+              onClick={() => setSyncMenuOpen((open) => !open)}
+              disabled={isSyncing || syncStarting}
+              aria-haspopup="menu"
+              aria-expanded={syncMenuOpen}
+            >
+              <Icon d={ICONS.sync} size={14} />
+              {syncStarting ? 'Iniciando…' : isSyncing ? 'Sincronizando…' : 'Sincronizar'}
+              {!syncStarting && !isSyncing && <Icon d={ICONS.chevronDown} size={13} />}
+            </button>
+            {syncMenuOpen && !isSyncing && !syncStarting && (
+              <div className="crm-sync-dropdown" role="menu">
+                {[
+                  ['organizacoes', 'Organizações'],
+                  ['cotacoes', 'Cotações'],
+                  ['pedidos', 'Pedidos de venda'],
+                  ['all', 'Todos os módulos'],
+                ].map(([module, label]) => (
+                  <button key={module} className="crm-sync-option" role="menuitem" onClick={() => handleSync(module)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {(isSyncing || syncStarting) && (
+            <span className="crm-sync-progress" aria-live="polite">
+              {syncStarting ? 'Iniciando sincronização…' : `Sincronizando ${MODULES[syncStatus?.module]?.label || syncStatus?.module || ''} (pág. ${syncStatus?.page || 0}${syncStatus?.totalPages ? `/${syncStatus.totalPages}` : ''})…`}
+            </span>
+          )}
         </div>
       </div>
 
@@ -410,11 +490,11 @@ export default function Crm({ onNotify }) {
         ))}
       </div>
 
-      {moduleKey === 'organizacoes' && (
+      {!config.usesColumnFilters && (
         <div className="crm-toolbar">
           <div className="crm-search">
             <Icon d={ICONS.search} size={15} />
-            <input type="text" placeholder="Buscar organizações..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+            <input type="text" placeholder={`Buscar ${config.label.toLowerCase()}...`} value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
           </div>
           <div className="crm-filter-wrap">
             <button className="crm-filter-btn" onClick={() => setFilterOpen((o) => !o)}>
@@ -436,35 +516,35 @@ export default function Crm({ onNotify }) {
         </div>
       )}
 
-      {moduleKey === 'cotacoes' && (
+      {config.usesColumnFilters && (
         <div className="crm-cot-filters">
           <div className="crm-cot-filters-grid">
             <label className="crm-cot-field">
-              <span>{COTACAO_TITLE_FILTER.filterLabel}</span>
-              <input value={cotDraft.subject} onChange={(e) => setCotDraft((f) => ({ ...f, subject: e.target.value }))} onKeyDown={onCotFieldKeyDown} />
+              <span>{config.titleFilterLabel}</span>
+              <input value={colDraft[config.titleFilterKey] || ''} onChange={(e) => setColDraft((f) => ({ ...f, [config.titleFilterKey]: e.target.value }))} onKeyDown={onColFieldKeyDown} />
             </label>
-            {COTACAO_COLUMNS.map((c) => (
+            {config.columns.map((c) => (
               <label className="crm-cot-field" key={c.filterKey}>
                 <span>{c.filterLabel}</span>
-                <input value={cotDraft[c.filterKey]} onChange={(e) => setCotDraft((f) => ({ ...f, [c.filterKey]: e.target.value }))} onKeyDown={onCotFieldKeyDown} />
+                <input value={colDraft[c.filterKey] || ''} onChange={(e) => setColDraft((f) => ({ ...f, [c.filterKey]: e.target.value }))} onKeyDown={onColFieldKeyDown} />
               </label>
             ))}
             <label className="crm-cot-field">
-              <span>Emissão (de)</span>
-              <input type="date" value={cotDraft.data_de} onChange={(e) => setCotDraft((f) => ({ ...f, data_de: e.target.value }))} onKeyDown={onCotFieldKeyDown} />
+              <span>{config.dateFilterLabel} (de)</span>
+              <input type="date" value={colDraft.data_de || ''} onChange={(e) => setColDraft((f) => ({ ...f, data_de: e.target.value }))} onKeyDown={onColFieldKeyDown} />
             </label>
             <label className="crm-cot-field">
-              <span>Emissão (até)</span>
-              <input type="date" value={cotDraft.data_ate} onChange={(e) => setCotDraft((f) => ({ ...f, data_ate: e.target.value }))} onKeyDown={onCotFieldKeyDown} />
+              <span>{config.dateFilterLabel} (até)</span>
+              <input type="date" value={colDraft.data_ate || ''} onChange={(e) => setColDraft((f) => ({ ...f, data_ate: e.target.value }))} onKeyDown={onColFieldKeyDown} />
             </label>
           </div>
           <div className="crm-cot-filters-actions">
-            <button className="crm-btn-primary" onClick={applyCotFilters}>
+            <button className="crm-btn-primary" onClick={applyColFilters}>
               <Icon d={ICONS.search} size={14} />
               Pesquisar
             </button>
-            {hasActiveCotFilters && (
-              <button className="crm-btn-text" onClick={clearCotFilters}>Limpar filtros</button>
+            {hasActiveColFilters && (
+              <button className="crm-btn-text" onClick={clearColFilters}>Limpar filtros</button>
             )}
             <div className="crm-count" style={{ marginLeft: 'auto' }}>
               {loading ? 'Carregando…' : `${total.toLocaleString('pt-BR')} registros`}
@@ -481,7 +561,7 @@ export default function Crm({ onNotify }) {
           <table className="crm-table">
             <thead>
               <tr>
-                <th>{config.singular === 'organização' ? 'Nome' : 'Assunto'}</th>
+                <th>{config.titleColumnLabel}</th>
                 {config.columns.map((c) => (<th key={c.key} className="crm-th-icon"><Icon d={c.icon} size={13} />{c.label}</th>))}
                 <th className="crm-th-chevron" />
               </tr>

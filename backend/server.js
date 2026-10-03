@@ -817,6 +817,10 @@ function parseDataEmissao(r) {
   const raw = r.data_emissao_inbrape || (r.createdtime ? String(r.createdtime).split(' ')[0] : null);
   return raw || null;
 }
+function parseDataPedido(r) {
+  const raw = r.data_pedido_inbrape || (r.createdtime ? String(r.createdtime).split(' ')[0] : null);
+  return raw || null;
+}
 
 async function gluoFetchPage(path, page, extraParams = {}) {
   const params = new URLSearchParams({ page, limit: 100, ...extraParams });
@@ -893,6 +897,48 @@ async function upsertCotacoes(rows) {
   );
 }
 
+// Pedidos de venda (módulo SalesOrder da Gluo) — mesmo padrão de cotações
+async function upsertPedidos(rows) {
+  const valid = rows.filter((r) => {
+    const date = parseDataPedido(r);
+    return r.id && date && !Number.isNaN(Date.parse(date)) && Date.parse(date) >= Date.parse('2022-01-01');
+  });
+  if (valid.length === 0) return;
+  const cols = [
+    'id', 'subject', 'salesorder_no', 'account_id', 'sostatus', 'total', 'data_pedido',
+    'nome_representante_inbrape', 'complemento_inbrape', 'produto_inbrape', 'cod_representante_inbrape',
+    'search_text', 'data',
+  ];
+  const values = [];
+  const placeholders = valid
+    .map((r, i) => {
+      const b = i * cols.length;
+      const total = r.total != null && !Number.isNaN(Number(r.total)) ? Number(r.total) : null;
+      values.push(
+        r.id, r.subject || null, r.salesorder_no || null, r.account_id || null,
+        r.sostatus || null, total, parseDataPedido(r),
+        r.nome_representante_inbrape || null, r.complemento_inbrape || null,
+        r.produto_inbrape || null, r.cod_representante_inbrape || null,
+        buildSearchText(r), JSON.stringify(r)
+      );
+      return `(${cols.map((_, j) => `$${b + j + 1}`).join(',')})`;
+    })
+    .join(',');
+  await pool.query(
+    `INSERT INTO crm_pedidos_venda (${cols.join(', ')})
+     VALUES ${placeholders}
+     ON CONFLICT (id) DO UPDATE SET
+       subject=EXCLUDED.subject, salesorder_no=EXCLUDED.salesorder_no, account_id=EXCLUDED.account_id,
+       sostatus=EXCLUDED.sostatus, total=EXCLUDED.total, data_pedido=EXCLUDED.data_pedido,
+       nome_representante_inbrape=EXCLUDED.nome_representante_inbrape,
+       complemento_inbrape=EXCLUDED.complemento_inbrape,
+       produto_inbrape=EXCLUDED.produto_inbrape,
+       cod_representante_inbrape=EXCLUDED.cod_representante_inbrape,
+       search_text=EXCLUDED.search_text, data=EXCLUDED.data, synced_at=now()`,
+    values
+  );
+}
+
 async function syncModule(path, upsertFn, moduleLabel) {
   let page = 1;
   const BATCH = 100;
@@ -909,15 +955,41 @@ async function syncModule(path, upsertFn, moduleLabel) {
   }
 }
 
-async function runFullSync() {
+const CRM_SYNC_MASTER = {
+  organizacoes: { path: '/accounts', upsertFn: upsertOrganizacoes, label: 'organizacoes' },
+  cotacoes: { path: '/quotes', upsertFn: upsertCotacoes, label: 'cotacoes' },
+  pedidos: { path: '/salesorder', upsertFn: upsertPedidos, label: 'pedidos' },
+};
+
+function normalizeSyncModules(raw) {
+  const values = Array.isArray(raw) ? raw : [raw];
+  const normalized = values
+    .flatMap((item) => typeof item === 'string' ? item.split(',') : [])
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (!normalized.length || normalized.includes('all')) {
+    return Object.keys(CRM_SYNC_MASTER);
+  }
+
+  const unique = [...new Set(normalized)];
+  return unique.filter((key) => key in CRM_SYNC_MASTER);
+}
+
+async function runFullSync(selectedModules = Object.keys(CRM_SYNC_MASTER)) {
   if (syncState.running) return;
   syncState.running = true;
   syncState.error = null;
   syncState.startedAt = new Date().toISOString();
   syncState.finishedAt = null;
   try {
-    await syncModule('/accounts', upsertOrganizacoes, 'organizacoes');
-    await syncModule('/quotes', upsertCotacoes, 'cotacoes');
+    const modules = normalizeSyncModules(selectedModules);
+    if (!modules.length) throw new Error('Nenhum módulo de CRM válido foi informado para sincronização.');
+
+    for (const moduleName of modules) {
+      const cfg = CRM_SYNC_MASTER[moduleName];
+      await syncModule(cfg.path, cfg.upsertFn, cfg.label);
+    }
   } catch (err) {
     syncState.error = err.message;
     console.error('[crm/sync]', err.message);
@@ -944,7 +1016,6 @@ async function initCrmTables() {
   `);
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_org_search ON crm_organizacoes USING gin (search_text gin_trgm_ops)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_org_industry ON crm_organizacoes (industry)');
-  // NOVO: faltava índice pra busca por nome de organização (usado no filtro "Nome Organização" das cotações)
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_org_accountname_trgm ON crm_organizacoes USING gin (accountname gin_trgm_ops)');
 
   await pool.query(`
@@ -965,7 +1036,6 @@ async function initCrmTables() {
   await pool.query('ALTER TABLE crm_cotacoes ADD COLUMN IF NOT EXISTS complemento_inbrape TEXT');
   await pool.query('ALTER TABLE crm_cotacoes ADD COLUMN IF NOT EXISTS produto_inbrape TEXT');
   await pool.query('ALTER TABLE crm_cotacoes ADD COLUMN IF NOT EXISTS cod_representante_inbrape TEXT');
-  // NOVO: coluna de data de emissão, pro filtro por data
   await pool.query('ALTER TABLE crm_cotacoes ADD COLUMN IF NOT EXISTS data_emissao DATE');
 
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_search ON crm_cotacoes USING gin (search_text gin_trgm_ops)');
@@ -975,55 +1045,43 @@ async function initCrmTables() {
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_repr ON crm_cotacoes USING gin (nome_representante_inbrape gin_trgm_ops)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_produto ON crm_cotacoes USING gin (produto_inbrape gin_trgm_ops)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_complemento ON crm_cotacoes USING gin (complemento_inbrape gin_trgm_ops)');
-  // CORRIGIDO: era btree (não ajuda ILIKE), agora é trigram de verdade
   await pool.query('DROP INDEX IF EXISTS idx_crm_cot_codrepr');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_codrepr ON crm_cotacoes USING gin (cod_representante_inbrape gin_trgm_ops)');
-  // NOVOS: pro filtro de Total (agora exato, não mais texto) e pro filtro de data
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_total ON crm_cotacoes (total)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_cot_data_emissao ON crm_cotacoes (data_emissao)');
+
+  // NOVO: Pedidos de Venda (módulo SalesOrder)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crm_pedidos_venda (
+      id TEXT PRIMARY KEY,
+      subject TEXT,
+      salesorder_no TEXT,
+      account_id TEXT,
+      sostatus TEXT,
+      total NUMERIC,
+      data_pedido DATE,
+      nome_representante_inbrape TEXT,
+      complemento_inbrape TEXT,
+      produto_inbrape TEXT,
+      cod_representante_inbrape TEXT,
+      search_text TEXT,
+      data JSONB NOT NULL,
+      synced_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_ped_search ON crm_pedidos_venda USING gin (search_text gin_trgm_ops)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_ped_status ON crm_pedidos_venda (sostatus)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_ped_account ON crm_pedidos_venda (account_id)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_ped_subject ON crm_pedidos_venda USING gin (subject gin_trgm_ops)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_ped_repr ON crm_pedidos_venda USING gin (nome_representante_inbrape gin_trgm_ops)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_ped_produto ON crm_pedidos_venda USING gin (produto_inbrape gin_trgm_ops)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_ped_complemento ON crm_pedidos_venda USING gin (complemento_inbrape gin_trgm_ops)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_ped_codrepr ON crm_pedidos_venda USING gin (cod_representante_inbrape gin_trgm_ops)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_ped_total ON crm_pedidos_venda (total)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crm_ped_data_pedido ON crm_pedidos_venda (data_pedido)');
 }
 
-// Monta WHERE/params compartilhado entre a listagem e a exportação de cotações
-function buildCotacoesWhere(query) {
-  const textFilters = {
-    subject: query.subject,
-    nome_representante_inbrape: query.nome_representante_inbrape,
-    complemento_inbrape: query.complemento_inbrape,
-    produto_inbrape: query.produto_inbrape,
-    cod_representante_inbrape: query.cod_representante_inbrape,
-  };
-  const quotestage = (query.quotestage || '').trim();
-  const accountName = (query.account_name || '').trim();
-  const totalFilter = (query.total || '').trim();
-  const dataDe = (query.data_de || '').trim();
-  const dataAte = (query.data_ate || '').trim();
-
-  const conditions = [];
-  const params = [];
-  Object.entries(textFilters).forEach(([col, val]) => {
-    const v = (val || '').trim();
-    if (v) { params.push(`%${v}%`); conditions.push(`c.${col} ILIKE $${params.length}`); }
-  });
-  // Estágio agora é comparação exata (case-insensitive) — mais rápido e mais correto
-  // que ILIKE substring num campo de poucos valores possíveis (Aberto/Vencedor/Perdedor).
-  if (quotestage) { params.push(quotestage); conditions.push(`LOWER(c.quotestage) = LOWER($${params.length})`); }
-  // Total agora casa valor exato (usa índice numérico) em vez de ILIKE em texto convertido,
-  // que forçava varredura completa da tabela toda vez.
-  if (totalFilter) {
-    const n = Number(totalFilter.replace(',', '.'));
-    if (!Number.isNaN(n)) { params.push(n); conditions.push(`c.total = $${params.length}`); }
-  }
-  if (dataDe) { params.push(dataDe); conditions.push(`c.data_emissao >= $${params.length}`); }
-  if (dataAte) { params.push(dataAte); conditions.push(`c.data_emissao <= $${params.length}`); }
-
-  const needsJoin = !!accountName;
-  if (accountName) { params.push(`%${accountName}%`); conditions.push(`o.accountname ILIKE $${params.length}`); }
-
-  const from = needsJoin ? 'crm_cotacoes c LEFT JOIN crm_organizacoes o ON o.id = c.account_id' : 'crm_cotacoes c';
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  return { from, where, params };
-}
-
+// ── Monta WHERE compartilhado entre listagem e exportação ──
 function buildOrganizacoesWhere(query) {
   const q = (query.q || '').trim().toLowerCase();
   const filter = (query.filter || '').trim();
@@ -1035,6 +1093,73 @@ function buildOrganizacoesWhere(query) {
   return { where, params };
 }
 
+// Genérico pra cotações e pedidos — ambos têm o mesmo formato de filtro por coluna
+function buildColumnFilterWhere(query, { table, statusCol, dateCol, textCols, minDate }) {
+  const quotestage = (query[statusCol] || '').trim();
+  const accountName = (query.account_name || '').trim();
+  const totalFilter = (query.total || '').trim();
+  const dataDe = (query.data_de || '').trim();
+  const dataAte = (query.data_ate || '').trim();
+
+  const conditions = [];
+  const params = [];
+  if (minDate) { params.push(minDate); conditions.push(`c.${dateCol} >= $${params.length}`); }
+  textCols.forEach((col) => {
+    const v = (query[col] || '').trim();
+    if (v) { params.push(`%${v}%`); conditions.push(`c.${col} ILIKE $${params.length}`); }
+  });
+  if (quotestage) { params.push(quotestage); conditions.push(`LOWER(c.${statusCol}) = LOWER($${params.length})`); }
+  if (totalFilter) {
+    const n = Number(totalFilter.replace(',', '.'));
+    if (!Number.isNaN(n)) { params.push(n); conditions.push(`c.total = $${params.length}`); }
+  }
+  if (dataDe) { params.push(dataDe); conditions.push(`c.${dateCol} >= $${params.length}`); }
+  if (dataAte) { params.push(dataAte); conditions.push(`c.${dateCol} <= $${params.length}`); }
+
+  const needsJoin = !!accountName;
+  if (accountName) { params.push(`%${accountName}%`); conditions.push(`o.accountname ILIKE $${params.length}`); }
+
+  const from = needsJoin ? `${table} c LEFT JOIN crm_organizacoes o ON o.id = c.account_id` : `${table} c`;
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return { from, where, params };
+}
+
+const buildCotacoesWhere = (query) => buildColumnFilterWhere(query, {
+  table: 'crm_cotacoes', statusCol: 'quotestage', dateCol: 'data_emissao',
+  textCols: ['subject', 'nome_representante_inbrape', 'complemento_inbrape', 'produto_inbrape', 'cod_representante_inbrape'],
+});
+const buildPedidosWhere = (query) => buildColumnFilterWhere(query, {
+  table: 'crm_pedidos_venda', statusCol: 'sostatus', dateCol: 'data_pedido',
+  minDate: '2022-01-01',
+  textCols: ['subject', 'nome_representante_inbrape', 'complemento_inbrape', 'produto_inbrape', 'cod_representante_inbrape'],
+});
+
+// Builder genérico de rota de listagem (1 query, COUNT(*) OVER())
+function buildListRoute(buildWhereFn) {
+  return async (req, res) => {
+    try {
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+      const offset = (page - 1) * limit;
+      const { from, where, params } = buildWhereFn(req.query);
+
+      const listParams = [...params, limit, offset];
+      const dataRes = await pool.query(
+        `SELECT c.data, COUNT(*) OVER() AS total_count
+         FROM ${from} ${where}
+         ORDER BY c.synced_at DESC
+         LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
+        listParams
+      );
+      const total = dataRes.rows.length > 0 ? parseInt(dataRes.rows[0].total_count, 10) : 0;
+      res.json({ data: dataRes.rows.map((r) => r.data), meta: { page, limit, total, hasMore: offset + limit < total } });
+    } catch (err) {
+      console.error(`[list ${req.path}]`, err.message);
+      res.status(500).json({ error: err.message });
+    }
+  };
+}
+
 // ── Organizações ──
 app.get('/crm/organizacoes', auth, async (req, res) => {
   try {
@@ -1043,7 +1168,6 @@ app.get('/crm/organizacoes', auth, async (req, res) => {
     const offset = (page - 1) * limit;
     const { where, params } = buildOrganizacoesWhere(req.query);
 
-    // Antes eram 2 queries (COUNT + SELECT); agora é 1 só, usando COUNT(*) OVER()
     const listParams = [...params, limit, offset];
     const dataRes = await pool.query(
       `SELECT data, COUNT(*) OVER() AS total_count
@@ -1053,7 +1177,6 @@ app.get('/crm/organizacoes', auth, async (req, res) => {
       listParams
     );
     const total = dataRes.rows.length > 0 ? parseInt(dataRes.rows[0].total_count, 10) : 0;
-
     res.json({ data: dataRes.rows.map((r) => r.data), meta: { page, limit, total, hasMore: offset + limit < total } });
   } catch (err) {
     console.error('[crm/organizacoes]', err.message);
@@ -1114,8 +1237,7 @@ app.get('/crm/organizacoes/export', auth, async (req, res) => {
       const row = ws.addRow(item);
       if (i % 2 === 1) row.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }; });
     });
-    const fatCol = ws.getColumn('valor_ultimo_fat_inbrape');
-    fatCol.numFmt = '"R$" #,##0.00';
+    ws.getColumn('valor_ultimo_fat_inbrape').numFmt = '"R$" #,##0.00';
     ws.autoFilter = { from: 'A1', to: `${String.fromCharCode(64 + ws.columns.length)}1` };
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -1129,29 +1251,7 @@ app.get('/crm/organizacoes/export', auth, async (req, res) => {
 });
 
 // ── Cotações ──
-app.get('/crm/cotacoes', auth, async (req, res) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
-    const offset = (page - 1) * limit;
-    const { from, where, params } = buildCotacoesWhere(req.query);
-
-    const listParams = [...params, limit, offset];
-    const dataRes = await pool.query(
-      `SELECT c.data, COUNT(*) OVER() AS total_count
-       FROM ${from} ${where}
-       ORDER BY c.synced_at DESC
-       LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
-      listParams
-    );
-    const total = dataRes.rows.length > 0 ? parseInt(dataRes.rows[0].total_count, 10) : 0;
-
-    res.json({ data: dataRes.rows.map((r) => r.data), meta: { page, limit, total, hasMore: offset + limit < total } });
-  } catch (err) {
-    console.error('[crm/cotacoes]', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+app.get('/crm/cotacoes', auth, buildListRoute(buildCotacoesWhere));
 
 app.get('/crm/cotacoes/export', auth, async (req, res) => {
   try {
@@ -1179,7 +1279,6 @@ app.get('/crm/cotacoes/export', auth, async (req, res) => {
       { header: 'Complemento', key: '_complemento', width: 28 },
       { header: 'Cód. Representante', key: '_cod_rep', width: 14 },
     ];
-
     ws.getRow(1).eachCell((cell) => {
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF024088' } };
@@ -1188,26 +1287,18 @@ app.get('/crm/cotacoes/export', auth, async (req, res) => {
     ws.getRow(1).height = 22;
 
     const STAGE_ARGB = { vencedor: 'FFD1FAE5', perdedor: 'FFFEE2E2', aberto: 'FFDBEAFE' };
-
     r.rows.forEach((row, i) => {
       const d = row.data;
       const line = ws.addRow({
-        _subject: d.subject || '',
-        _quote_no: d.quote_no || '',
-        _cliente: row.cliente_nome || '',
-        _representante: d.nome_representante_inbrape || '',
-        _status: d.quotestage || '',
-        _total: d.total != null ? Number(d.total) : null,
-        _data_emissao: d.data_emissao_inbrape || '',
-        _produto: d.produto_inbrape || '',
-        _complemento: d.complemento_inbrape || '',
-        _cod_rep: d.cod_representante_inbrape || '',
+        _subject: d.subject || '', _quote_no: d.quote_no || '', _cliente: row.cliente_nome || '',
+        _representante: d.nome_representante_inbrape || '', _status: d.quotestage || '',
+        _total: d.total != null ? Number(d.total) : null, _data_emissao: d.data_emissao_inbrape || '',
+        _produto: d.produto_inbrape || '', _complemento: d.complemento_inbrape || '', _cod_rep: d.cod_representante_inbrape || '',
       });
       if (i % 2 === 1) line.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }; });
       const stageColor = STAGE_ARGB[String(d.quotestage || '').toLowerCase()];
       if (stageColor) line.getCell('_status').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: stageColor } };
     });
-
     ws.getColumn('_total').numFmt = '"R$" #,##0.00';
     ws.autoFilter = { from: 'A1', to: `${String.fromCharCode(64 + ws.columns.length)}1` };
 
@@ -1221,11 +1312,84 @@ app.get('/crm/cotacoes/export', auth, async (req, res) => {
   }
 });
 
+// ── Pedidos de Venda ──
+app.get('/crm/pedidos', auth, buildListRoute(buildPedidosWhere));
+
+app.get('/crm/pedidos/export', auth, async (req, res) => {
+  try {
+    const { from, where, params } = buildPedidosWhere(req.query);
+    const r = await pool.query(
+      `SELECT c.data, o.accountname AS cliente_nome
+       FROM ${from.includes('LEFT JOIN') ? from : 'crm_pedidos_venda c LEFT JOIN crm_organizacoes o ON o.id = c.account_id'}
+       ${where}
+       ORDER BY c.synced_at DESC`,
+      params
+    );
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Inbrape';
+    const ws = wb.addWorksheet('Pedidos de Venda', { views: [{ state: 'frozen', ySplit: 1 }] });
+    ws.columns = [
+      { header: 'Assunto', key: '_subject', width: 16 },
+      { header: 'Nº Pedido', key: '_pedido_no', width: 14 },
+      { header: 'Cliente', key: '_cliente', width: 32 },
+      { header: 'Representante', key: '_representante', width: 22 },
+      { header: 'Status', key: '_status', width: 14 },
+      { header: 'Total (R$)', key: '_total', width: 16 },
+      { header: 'Data Pedido', key: '_data_pedido', width: 14 },
+      { header: 'Produto', key: '_produto', width: 28 },
+      { header: 'Complemento', key: '_complemento', width: 28 },
+      { header: 'Cód. Representante', key: '_cod_rep', width: 14 },
+    ];
+    ws.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF024088' } };
+      cell.alignment = { vertical: 'middle' };
+    });
+    ws.getRow(1).height = 22;
+
+    const STATUS_ARGB = { delivered: 'FFD1FAE5', invoiced: 'FFD1FAE5', cancelled: 'FFFEE2E2', canceled: 'FFFEE2E2', created: 'FFF1F5F9', approved: 'FFDBEAFE' };
+    r.rows.forEach((row, i) => {
+      const d = row.data;
+      const line = ws.addRow({
+        _subject: d.subject || '', _pedido_no: d.salesorder_no || '', _cliente: row.cliente_nome || '',
+        _representante: d.nome_representante_inbrape || '', _status: d.sostatus || '',
+        _total: d.total != null ? Number(d.total) : null, _data_pedido: d.data_pedido_inbrape || '',
+        _produto: d.produto_inbrape || '', _complemento: d.complemento_inbrape || '', _cod_rep: d.cod_representante_inbrape || '',
+      });
+      if (i % 2 === 1) line.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }; });
+      const statusColor = STATUS_ARGB[String(d.sostatus || '').toLowerCase()];
+      if (statusColor) line.getCell('_status').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: statusColor } };
+    });
+    ws.getColumn('_total').numFmt = '"R$" #,##0.00';
+    ws.autoFilter = { from: 'A1', to: `${String.fromCharCode(64 + ws.columns.length)}1` };
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="pedidos_venda.xlsx"');
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[crm/pedidos/export]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Sincronização ──
 app.post('/crm/sync', auth, admin, (req, res) => {
   if (syncState.running) return res.status(409).json({ error: 'Sincronização já em andamento' });
-  runFullSync();
-  res.json({ started: true });
+
+  const requestedModule = req.body?.module ?? req.query?.module ?? 'all';
+  const selectedModules = normalizeSyncModules(requestedModule);
+
+  if (!selectedModules.length) {
+    return res.status(400).json({
+      error: 'Módulo inválido. Use: all, organizacoes, cotacoes, pedidos ou combinação deles.',
+      allowed: ['all', 'organizacoes', 'cotacoes', 'pedidos'],
+    });
+  }
+
+  runFullSync(selectedModules);
+  res.json({ started: true, modules: selectedModules });
 });
 
 app.get('/crm/sync/status', auth, (req, res) => {
