@@ -1786,6 +1786,176 @@ app.get('/dashboard/contas', auth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
+// IA · ANÁLISES E INSIGHTS SOBRE O CRM
+// ─────────────────────────────────────────────
+const CRM_SCHEMA_DESCRIPTION = `
+Tabela crm_organizacoes (clientes/organizações):
+- id (texto, chave primária), accountname (nome do cliente), cpfcnpj, industry (segmento)
+- data (JSONB com o registro completo da Gluo CRM; campos úteis dentro dele incluem:
+  bill_city, bill_state, classificacao_abc_inbrape, dias_sem_venda_inbrape, valor_ultimo_fat_inbrape,
+  ticket_medio_inbrape, ticket_medio_mensal_crm, curva_abc_inbrape, cliente_ativo_inbrape,
+  nome_representante_inbrape, cod_representante_inbrape, data_ultimo_fat_inbrape)
+  Acesse com data->>'nome_do_campo' (retorna texto; faça CAST para number/date quando precisar comparar).
+
+Tabela crm_cotacoes (cotações/propostas comerciais):
+- id, subject (assunto), quote_no, account_id (chave estrangeira para crm_organizacoes.id),
+  quotestage (valores: 'Aberto', 'Vencedor', 'Perdedor'), total (numeric, valor em R$),
+  validtill, data_emissao (date), nome_representante_inbrape, produto_inbrape,
+  complemento_inbrape, cod_representante_inbrape
+- data (JSONB com o registro completo)
+
+Tabela crm_pedidos_venda (pedidos de venda já fechados, módulo SalesOrder):
+- id, subject, salesorder_no, account_id (chave estrangeira para crm_organizacoes.id),
+  sostatus (status do pedido, ex: Created, Approved, Delivered, Invoiced, Cancelled),
+  total (numeric, valor em R$), data_pedido (date), nome_representante_inbrape, produto_inbrape,
+  complemento_inbrape, cod_representante_inbrape
+- data (JSONB com o registro completo)
+
+Para o nome do cliente em cotações/pedidos, faça JOIN com crm_organizacoes usando account_id = id.
+`.trim();
+
+function buildSqlGenPrompt(pergunta, erroAnterior) {
+  return `Você converte perguntas em português para consultas SQL PostgreSQL de SOMENTE LEITURA, usando o banco de dados abaixo.
+
+${CRM_SCHEMA_DESCRIPTION}
+
+Regras obrigatórias:
+- Gere APENAS uma consulta SELECT. Nunca INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE.
+- Nunca use ponto-e-vírgula (apenas um comando).
+- Sempre inclua LIMIT (máximo 500).
+- Para comparar valores dentro de "data" (JSONB) como número, use NULLIF(data->>'campo','')::numeric; como data, use NULLIF(data->>'campo','')::date.
+- Responda APENAS com um JSON válido, sem markdown e sem texto fora do JSON, neste formato exato:
+{
+  "sql": "SELECT ...",
+  "titulo": "título curto do relatório",
+  "tipo_grafico": "bar" | "line" | "pie" | "tabela",
+  "campo_rotulo": "nome da coluna do resultado que vira o rótulo/eixo X (ou vazio)",
+  "campo_valor": "nome da coluna do resultado que vira o valor numérico/eixo Y (ou vazio)"
+}
+Use "tipo_grafico": "tabela" quando a pergunta pedir uma lista/detalhamento de registros em vez de uma comparação numérica.
+
+${erroAnterior ? `Sua tentativa anterior gerou este erro do banco de dados: "${erroAnterior}". Corrija a consulta.\n` : ''}
+Pergunta do usuário: "${pergunta}"`;
+}
+
+function buildInsightsPrompt(pergunta, rows) {
+  return `Você é um analista de dados comercial da INBRAPE (fabricante industrial de mangas e gaiolas filtrantes), analisando dados do CRM.
+
+O usuário perguntou: "${pergunta}"
+
+Os dados abaixo (${rows.length} linha(s)) foram extraídos AGORA do banco de dados real pra responder essa pergunta:
+${JSON.stringify(rows.slice(0, 200))}
+
+Escreva uma análise objetiva em português, em parágrafos curtos (3 a 6 no total), citando números concretos dos dados acima. Aponte padrões, riscos ou oportunidades comerciais quando fizer sentido pro contexto. NUNCA invente números que não estão na lista acima — se os dados forem insuficientes pra alguma conclusão, diga isso. Não repita a pergunta, vá direto à análise.`;
+}
+
+function validateReadOnlySql(sql) {
+  const trimmed = String(sql || '').trim().replace(/;+\s*$/, '');
+  if (!/^select\s/i.test(trimmed)) throw new Error('A IA gerou uma consulta que não começa com SELECT.');
+  if (/\b(insert|update|delete|drop|alter|truncate|grant|revoke|copy|create)\b/i.test(trimmed)) {
+    throw new Error('A IA tentou gerar uma consulta com comando não permitido.');
+  }
+  if (trimmed.includes(';')) throw new Error('A IA tentou gerar mais de um comando SQL.');
+  const hasLimit = /\blimit\s+\d+/i.test(trimmed);
+  return hasLimit ? trimmed : `${trimmed} LIMIT 500`;
+}
+
+async function runReadOnlyQuery(sql) {
+  const client = await pool.connect();
+  try {
+    await client.query('SET statement_timeout = 8000');
+    const r = await client.query(sql);
+    return r.rows;
+  } finally {
+    client.release();
+  }
+}
+
+function parseAiJson(raw) {
+  const match = raw.match(/\{[\s\S]*\}/);
+  return JSON.parse(match ? match[0] : raw);
+}
+
+app.post('/ia/analise', auth, async (req, res) => {
+  try {
+    const pergunta = (req.body.pergunta || '').trim();
+    if (!pergunta) throw new Error('Digite uma pergunta ou pedido de análise.');
+
+    let plano = parseAiJson(await callAI(buildSqlGenPrompt(pergunta)));
+    let sql = validateReadOnlySql(plano.sql);
+    let rows;
+    try {
+      rows = await runReadOnlyQuery(sql);
+    } catch (firstErr) {
+      // Uma chance de autocorreção: manda o erro do banco de volta pra IA corrigir o SQL
+      plano = parseAiJson(await callAI(buildSqlGenPrompt(pergunta, firstErr.message)));
+      sql = validateReadOnlySql(plano.sql);
+      rows = await runReadOnlyQuery(sql);
+    }
+
+    const insights = rows.length > 0
+      ? await callAI(buildInsightsPrompt(pergunta, rows))
+      : 'A consulta não retornou nenhum registro para essa pergunta — talvez valha ajustar os critérios.';
+
+    res.json({
+      titulo: plano.titulo || pergunta,
+      sql,
+      tipoGrafico: plano.tipo_grafico || 'tabela',
+      campoRotulo: plano.campo_rotulo || null,
+      campoValor: plano.campo_valor || null,
+      insights,
+      rows,
+      totalLinhas: rows.length,
+    });
+  } catch (err) {
+    console.error('[ia/analise]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/ia/analise/exportar', auth, async (req, res) => {
+  try {
+    const { titulo, insights, rows } = req.body;
+    if (!Array.isArray(rows) || rows.length === 0) throw new Error('Nada para exportar.');
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Inbrape · Análise com IA';
+
+    const wsResumo = wb.addWorksheet('Resumo');
+    wsResumo.getColumn(1).width = 100;
+    wsResumo.addRow([titulo || 'Análise']).font = { bold: true, size: 16, color: { argb: 'FF024088' } };
+    wsResumo.addRow([]);
+    String(insights || '').split(/\n+/).filter(Boolean).forEach((paragrafo) => {
+      const row = wsResumo.addRow([paragrafo]);
+      row.alignment = { wrapText: true, vertical: 'top' };
+      row.height = Math.max(20, Math.ceil(paragrafo.length / 110) * 15);
+    });
+
+    const wsDados = wb.addWorksheet('Dados', { views: [{ state: 'frozen', ySplit: 1 }] });
+    const colunas = Object.keys(rows[0]);
+    wsDados.columns = colunas.map((c) => ({ header: c, key: c, width: 20 }));
+    wsDados.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF024088' } };
+    });
+    wsDados.getRow(1).height = 22;
+    rows.forEach((row, i) => {
+      const line = wsDados.addRow(row);
+      if (i % 2 === 1) line.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }; });
+    });
+    wsDados.autoFilter = { from: 'A1', to: `${String.fromCharCode(64 + colunas.length)}1` };
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="analise-ia.xlsx"');
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[ia/analise/exportar]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────
 // START
 // ─────────────────────────────────────────────
 initDB().then(async () => {

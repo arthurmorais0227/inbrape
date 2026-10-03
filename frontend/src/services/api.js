@@ -174,3 +174,32 @@ export async function getDashboardContas() {
   if (!r.ok) throw new Error('Erro ao buscar dados de contas.');
   return r.json();
 }
+
+export async function analisarComIA(pergunta) {
+  const r = await fetch(`${API_URL}/ia/analise`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pergunta }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Erro ao gerar análise.');
+  return data;
+}
+
+export async function exportarAnaliseIA({ titulo, insights, rows }) {
+  const r = await fetch(`${API_URL}/ia/analise/exportar`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ titulo, insights, rows }),
+  });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Erro ao exportar.'); }
+  const blob = await r.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'analise-ia.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}

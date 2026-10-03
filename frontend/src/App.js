@@ -12,6 +12,7 @@ import Home from "./pages/Home";
 import Dashboard from "./pages/Dashboard";
 import VisitaAudio from "./pages/VisitaAudio";
 import NavBar from "./pages/NavBar";
+import InsightsIA from "./pages/InsightsIA";
 import "./App.css";
 
 
@@ -252,6 +253,12 @@ export default function App() {
         component: Dashboard,
       },
       {
+        id: "ia-insights",
+        label: "Análise IA",
+        d: "M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L22 12l-6.714 2.143L13 21l-2.286-6.857L4 12l6.714-2.143L13 3z",
+        component: (props) => <InsightsIA {...props} onNotify={(msg) => notify(msg, "ia")} />,
+      },
+      {
         id: "text",
         label: "Texto",
         d: "M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z",
@@ -456,6 +463,9 @@ export default function App() {
         )}
         {activeTab === "visitas" && (
           <VisitaAudio onNotify={(msg) => notify(msg, "visitas")} />
+        )}
+        {activeTab === "ia-insights" && (
+          <InsightsIA onNotify={(msg) => notify(msg, "ia")} />
         )}
         {activeTab === "home" && <Home user={user} onNavigate={setActiveTab} />}
         {activeTab === "dashboard" && <Dashboard />}

@@ -26,6 +26,8 @@ const QUICK = [
 const TOOLS = [
   { label: 'Painel', desc: 'Indicadores de pipeline, visitas e contas.', page: 'dashboard', color: '#024088',
     d: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
+  { label: 'Análise IA', desc: 'Insights inteligentes para apoiar suas decisões.', page: 'ia-insights', color: '#E87722',
+    d: 'M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L22 12l-6.714 2.143L13 21l-2.286-6.857L4 12l6.714-2.143L13 3z' },
   { label: 'Visitas', desc: 'Transcreva áudios e registre relatórios de visita.', page: 'visitas', color: '#E87722',
     d: 'M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2M12 19v4m-4 0h8' },
   { label: 'Usuários', desc: 'Gerencie usuários e PDFs padrão.', page: 'admin', adminOnly: true, color: '#64748B',
